@@ -1,0 +1,8 @@
+# 构建产物
+MiTVSwitch.app/
+*.app
+.objects/
+
+# 本地配置与日志
+*.log
+.DS_Store

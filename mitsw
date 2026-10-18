@@ -1,0 +1,60 @@
+#!/bin/zsh
+# MiTVSwitch 命令行版
+#
+# 地址来源（优先级从高到低）：
+#   1. 环境变量 MITV_IP
+#   2. 配置文件 ~/.config/mitvswitch/host（菜单栏 App 也会写这里）
+#
+# 用法：
+#   mitsw hdmi1          切到 HDMI 1
+#   mitsw hdmi2          切到 HDMI 2
+#   mitsw dp             切到 DisplayPort
+#   mitsw usbc           切到 USB-C
+#   mitsw raw <源名>      直接发送自定义源名
+#   mitsw status         查看设备信息
+#   mitsw vol            查看音量
+#   mitsw keys           列出常用按键
+
+CONF="${HOME}/.config/mitvswitch/host"
+PORT=6095
+
+IP="${MITV_IP:-$(tr -d '[:space:]' < "$CONF" 2>/dev/null)}"
+if [[ -z "$IP" ]]; then
+  print "❌ 未设置显示器地址。"
+  print "   方式一：打开菜单栏 App → 设置显示器地址"
+  print "   方式二：mkdir -p ~/.config/mitvswitch && echo 192.168.1.100 > ~/.config/mitvswitch/host"
+  print "   方式三：export MITV_IP=192.168.1.100"
+  exit 1
+fi
+
+BASE="http://${IP}:${PORT}/controller?action="
+
+send() {
+  local resp
+  # --noproxy '*' 很关键：macOS 系统代理的例外列表不认 CIDR 网段，
+  # 不加这一项，发往局域网设备的请求会被塞进代理然后失败。
+  resp=$(curl -s --noproxy '*' -m 5 "${BASE}$1")
+  if [[ "$resp" == *'"success"'* ]]; then
+    print "✅ $2"
+    return 0
+  fi
+  print "❌ $2 失败：${resp:-（无响应）}"
+  return 1
+}
+
+case "$1" in
+  hdmi1|1)    send "changesource&source=HDMI1" "已切到 HDMI 1" ;;
+  hdmi2|2)    send "changesource&source=HDMI2" "已切到 HDMI 2" ;;
+  hdmi3|3)    send "changesource&source=HDMI3" "已切到 HDMI 3" ;;
+  dp|dp1)     send "changesource&source=DP"    "已切到 DisplayPort" ;;
+  usbc|typec) send "changesource&source=USBC"  "已切到 USB-C" ;;
+  raw)        send "changesource&source=$2"    "已发送源名 $2" ;;
+  status|s)   curl -s --noproxy '*' -m 5 "${BASE}getsysteminfo"; print ;;
+  vol)        curl -s --noproxy '*' -m 5 "${BASE}getvolume"; print ;;
+  keys)
+    print "按键（keyevent）：power up down left right enter home back menu volumeup volumedown"
+    print "示例：curl -s --noproxy '*' \"${BASE}keyevent&keycode=home\"" ;;
+  *)
+    print "用法: mitsw {hdmi1|hdmi2|hdmi3|dp|usbc|raw <源名>|status|vol|keys}"
+    exit 1 ;;
+esac
