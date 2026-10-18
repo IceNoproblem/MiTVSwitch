@@ -1,0 +1,80 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: 编译（自包含单文件）
+        run: >
+          dotnet publish windows/MiTVSwitch.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -o out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MiTVSwitch-win-x64
+          path: out/MiTVSwitch.exe
+          if-no-files-found: error
+
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 编译
+        run: |
+          cd macos
+          chmod +x build.sh
+          ./build.sh
+
+      - name: 打包
+        run: |
+          cd macos
+          ditto -c -k --sequesterRsrc --keepParent MiTVSwitch.app MiTVSwitch-macos.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MiTVSwitch-macos
+          path: macos/MiTVSwitch-macos.zip
+          if-no-files-found: error
+
+  release:
+    name: 发布
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: 重命名产物
+        run: |
+          mkdir -p files
+          cp dist/MiTVSwitch-win-x64/MiTVSwitch.exe files/MiTVSwitch-win-x64.exe
+          cp dist/MiTVSwitch-macos/MiTVSwitch-macos.zip files/
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: files/*
+          generate_release_notes: true

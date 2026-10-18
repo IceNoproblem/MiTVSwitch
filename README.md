@@ -1,13 +1,13 @@
 # MiTVSwitch
 
-给**小米 / 红米电视**和**内置澎湃 OS 的智能显示器**做「一键切信号源」的 macOS 菜单栏小工具。
+给**小米 / 红米电视**和**内置澎湃 OS 的智能显示器**做「一键切信号源」的小工具，**macOS** 和 **Windows** 双平台。
 
 一个快捷键把显示器从电脑切到游戏机，再一个快捷键切回来。不用找遥控器，不用翻 OSD 菜单，不用改接线。
 
-```
-⌃⌥1  →  HDMI 1 （游戏机）
-⌃⌥2  →  HDMI 2 （电脑）
-```
+| 平台 | 形态 | 快捷键 |
+|---|---|---|
+| macOS | 菜单栏 App（Swift / AppKit） | `⌃⌥1` / `⌃⌥2` |
+| Windows | 托盘 App（C# / WinForms） | `Ctrl+Alt+1` / `Ctrl+Alt+2` |
 
 ---
 
@@ -46,36 +46,45 @@
 
 ### 判断你的设备支不支持
 
-在终端里跑一条命令：
+在终端 / PowerShell 里跑一条命令：
 
 ```bash
+# macOS
 curl -s --noproxy '*' "http://<设备IP>:6095/controller?action=getvolume"
 ```
 
-- 返回类似 `{"status":0,"msg":"success","data":{...}}` → **支持**
+```powershell
+# Windows
+$wc = New-Object System.Net.WebClient; $wc.Proxy = $null
+$wc.DownloadString("http://<设备IP>:6095/controller?action=getvolume")
+```
+
+- 返回 `{"status":0,"msg":"success","data":{...}}` → **支持**
 - 连不上 → 设备没开这个服务，或者不在同一网段
 
 > 智能电视基本都支持；显示器则看型号，内置澎湃 OS（小米电视系统）的型号大概率支持。
 
 ---
 
-## 快速开始（三步）
+## 快速开始
 
-### 1. 找到设备的局域网 IP
+### 第一步：找到设备的局域网 IP
 
 任选一种：
 
 - 路由器后台的设备列表里找名字带 `mitv-`、`MiTV`、`Redmi` 的设备
 - 米家 App 里的设备详情
-- 终端里扫一下：`arp -a | grep -i -E "mi|redmi"`
+- 终端里扫一下：macOS `arp -a | grep -i -E "mi|redmi"`，Windows `arp -a | findstr /i "mi redmi"`
 
-### 2. 编译并安装
+### 第二步：装
+
+#### macOS
 
 需要 macOS 13+ 和 Xcode Command Line Tools（`xcode-select --install`）。
 
 ```bash
-git clone https://github.com/<你的账号>/MiTVSwitch.git
-cd MiTVSwitch
+git clone https://github.com/IceNoproblem/MiTVSwitch.git
+cd MiTVSwitch/macos
 chmod +x build.sh
 ./build.sh
 
@@ -86,42 +95,75 @@ open /Applications/MiTVSwitch.app
 
 编译不需要开发者账号，脚本用 ad-hoc 签名，本机自用完全够。
 
-### 3. 设置地址
+#### Windows
 
-第一次启动会自动弹出设置窗口，填入第 1 步拿到的 IP。
+**方式一：直接用现成的 exe**
+
+到 [Releases](https://github.com/IceNoproblem/MiTVSwitch/releases) 下载 `MiTVSwitch-win-x64.exe`，双击运行。自包含单文件，**不需要装 .NET 运行时**。
+
+首次运行 Windows 可能弹 SmartScreen 提示（未知发布者），点「更多信息」→「仍要运行」即可。
+
+**方式二：自己编译**
+
+需要 [.NET 8 SDK](https://dotnet.microsoft.com/download)。
+
+```bat
+git clone https://github.com/IceNoproblem/MiTVSwitch.git
+cd MiTVSwitch\windows
+build.bat
+```
+
+产物在 `dist\win-x64\MiTVSwitch.exe`。
+
+### 第三步：设置地址
+
+第一次启动会自动弹出设置窗口，填入第一步拿到的 IP。
 
 也可以从菜单里点「**自动搜索局域网设备…**」，工具会扫描本机所在网段，把找到的设备列出来让你选。
 
-地址会保存在 `~/.config/mitvswitch/host`，命令行版也读这个文件。
+地址会保存在：
+
+- macOS：`~/.config/mitvswitch/host`
+- Windows：`%APPDATA%\MiTVSwitch\host.txt`
+
+两个平台的命令行工具都读这个文件。
 
 ---
 
 ## 使用
 
-菜单栏会出现一个 `▭▭` 图标，点开是全部功能：
+### 菜单项
+
+两个平台的菜单结构一致：
 
 | 菜单项 | 说明 |
 |---|---|
 | HDMI 1 / HDMI 2 | 切信号源，带快捷键提示 |
 | DisplayPort / USB-C | 其他接口（源名未在所有机型验证，见下） |
-| 睡眠时切到第 1 个源 | 勾选后，Mac 休眠自动切到第一个源，醒来切回第二个 |
+| 睡眠时切到「第一个源」 | 勾选后，电脑休眠自动切到第一个源，唤醒后切回第二个 |
 | 设置显示器地址… | 手动填 IP |
 | 自动搜索局域网设备… | 扫描同网段 |
 | 测试连接 | 查看设备信息，确认地址对不对 |
-| 开机自动启动 | 注册登录项（App 需在 /Applications 下） |
+| 查看日志 | 打开日志文件 |
+| 开机自动启动 | macOS 走登录项，Windows 走注册表 Run 键 |
+| 退出 | |
+
+macOS 点菜单栏的 `▭▭` 图标；Windows 右键托盘图标。
 
 ### 全局快捷键
 
-| 按键 | 动作 |
-|---|---|
-| `⌃⌥1` | 切到信号源列表第 1 项（默认 HDMI 1） |
-| `⌃⌥2` | 切到第 2 项（默认 HDMI 2） |
+| 平台 | 切到第 1 个源 | 切到第 2 个源 |
+|---|---|---|
+| macOS | `⌃⌥1` | `⌃⌥2` |
+| Windows | `Ctrl+Alt+1` | `Ctrl+Alt+2` |
 
-用的是 Carbon `RegisterEventHotKey`，**不需要辅助功能权限**，也不会抢焦点。即使显示器当前显示的是游戏机画面、你看不到 Mac 桌面，在键盘上按下去照样生效。
+macOS 用 Carbon `RegisterEventHotKey`，Windows 用 `RegisterHotKey`，**都不需要辅助功能权限**，也不会抢焦点。即使显示器当前显示的是游戏机画面、你看不到电脑桌面，在键盘上按下去照样生效。
 
-### 命令行版
+### 命令行
 
-仓库里的 `mitsw` 是个独立脚本，不依赖 App：
+#### macOS
+
+仓库里的 `macos/mitsw` 是独立脚本，不依赖 App：
 
 ```bash
 chmod +x mitsw
@@ -134,30 +176,62 @@ chmod +x mitsw
 ./mitsw vol            # 查看音量
 ```
 
-地址来源优先级：环境变量 `MITV_IP` > 配置文件 `~/.config/mitvswitch/host`。
+#### Windows
 
-适合塞进 Raycast / Alfred / Shortcuts / 快捷指令，或者自己写自动化。
+`windows/switch.ps1` 同样不依赖编译：
+
+```powershell
+.\switch.ps1 hdmi1
+.\switch.ps1 raw HDMI3
+.\switch.ps1 status
+```
+
+想把它绑成真正的全局快捷键，可以用 AutoHotkey 包一层：
+
+```autohotkey
+^!1::Run, powershell -WindowStyle Hidden -File "C:\path\to\switch.ps1" hdmi1
+^!2::Run, powershell -WindowStyle Hidden -File "C:\path\to\switch.ps1" hdmi2
+```
+
+或者给 `switch.ps1` 建个快捷方式，在「属性 → 快捷键」里设组合键。
 
 ---
 
 ## 自定义信号源
 
-打开 `main.swift`，改顶部的 `allSources`：
+### macOS
+
+打开 `macos/main.swift`，改顶部的 `allSources`：
 
 ```swift
 let allSources: [TVSource] = [
-    TVSource(key: "HDMI1", title: "游戏机",  hotKeyCode: UInt32(kVK_ANSI_1), hotMods: UInt32(controlKey | optionKey)),
-    TVSource(key: "HDMI2", title: "Mac",    hotKeyCode: UInt32(kVK_ANSI_2), hotMods: UInt32(controlKey | optionKey)),
-    TVSource(key: "DP",    title: "显示器 DP", hotKeyCode: 0, hotMods: 0),
+    TVSource(key: "HDMI1", title: "游戏机",    hotKeyCode: UInt32(kVK_ANSI_1), hotMods: UInt32(controlKey | optionKey)),
+    TVSource(key: "HDMI2", title: "Mac",      hotKeyCode: UInt32(kVK_ANSI_2), hotMods: UInt32(controlKey | optionKey)),
+    TVSource(key: "DP",    title: "显示器 DP",  hotKeyCode: 0, hotMods: 0),
 ]
 ```
 
-- `key`：传给 `changesource` 的源名，**大小写不敏感**
-- `title`：菜单里显示的名字
-- `hotKeyCode`：绑定的键（`kVK_ANSI_3` = 数字 3，以此类推），写 `0` 表示不绑
-- 数组第 1、2 项同时是「睡眠切换」的目标
+### Windows
 
-改完重新 `./build.sh` 即可。
+打开 `windows/TrayApp.cs`，改顶部的 `Sources`：
+
+```csharp
+private static readonly Source[] Sources =
+{
+    new Source { Key = "HDMI1", Title = "游戏机", Hotkey = Keys.Control | Keys.Alt | Keys.D1 },
+    new Source { Key = "HDMI2", Title = "电脑",   Hotkey = Keys.Control | Keys.Alt | Keys.D2 },
+    new Source { Key = "DP",    Title = "DisplayPort" },
+};
+```
+
+两边规则一样：
+
+- `key` / `Key`：传给 `changesource` 的源名，**大小写不敏感**
+- `title` / `Title`：菜单里显示的名字
+- 热键写 `0` / `Keys.None` 表示不绑
+- **数组第 1、2 项同时是「睡眠切换」的目标**（睡眠切到第 1 项，唤醒切回第 2 项）
+
+改完 macOS 重新 `./build.sh`，Windows 重新 `build.bat` 即可。
 
 ---
 
@@ -165,19 +239,21 @@ let allSources: [TVSource] = [
 
 ### 连接不上，但 `curl` 明明能通
 
-**最常见的坑：系统代理。**
+**最常见的坑：系统代理。** 两个平台都会踩。
 
-macOS 的系统代理「忽略这些主机」列表**不支持 CIDR 网段**——写 `192.168.0.0/16` 完全是无效的，系统会把它当一串普通字符。结果发往 `192.168.1.x` 的请求照样被塞进代理（比如 Clash 的 `127.0.0.1:7890`），然后死在代理里。
+系统代理的「忽略这些主机 / 例外列表」**往往不支持 CIDR 网段**——写 `192.168.0.0/16` 是无效的，系统会把它当一串普通字符。结果发往 `192.168.1.x` 的请求照样被塞进代理（比如 Clash 的 `127.0.0.1:7890`），然后死在代理里。
 
 表现很有迷惑性：**公网能通、局域网不通**，容易被误判成权限问题。
 
-本项目的做法是**完全不用 `NSURLSession`**，改用裸 BSD socket（`socket` + `connect` + `send/recv`）自己拼 HTTP/1.0 请求，从根上绕开代理层。命令行版则是给 `curl` 加 `--noproxy '*'`。
+本项目的处理方式：
 
-如果你在集成到自己的项目里，记得处理这一层。
+- **macOS 版完全不用 `NSURLSession`**，改用裸 BSD socket（`socket` + `connect` + `send/recv`）自己拼 HTTP/1.0 请求，从根上绕开代理层
+- **Windows 版**给 `HttpClientHandler` 设 `UseProxy = false`
+- 命令行版则是 `curl --noproxy '*'` / `WebClient.Proxy = $null`
 
-### 开机后第一次切换失败
+### 开机后第一次切换失败（macOS）
 
-冷启动时 ARP 缓存是冷的，`connect()` 会立刻返回 `EHOSTUNREACH (65)`，看起来像设备不在线。工具内置了 3 次重试（间隔递增），通常一下就过去了。
+冷启动时 ARP 缓存是冷的，`connect()` 会立刻返回 `EHOSTUNREACH (65)`，看起来像设备不在线。工具内置了 3 次递增退避重试，通常一下就过去了。
 
 ### 提示「源名不被设备接受」
 
@@ -185,9 +261,9 @@ macOS 的系统代理「忽略这些主机」列表**不支持 CIDR 网段**—�
 
 - `HDMI1` / `hdmi1` / `HDMI2` 都行
 - `HDMI_2` 不行
-- DP / USB-C 的源名各机型可能不同，可以逐个试：
+- DP / USB-C 的源名各机型可能不同，逐个试：
   ```bash
-  ./mitsw raw DP
+  ./mitsw raw DP        # 或 .\switch.ps1 raw DP
   ./mitsw raw USBC
   ./mitsw raw DP1
   ```
@@ -203,7 +279,7 @@ DDC/CI 是显示器切源的标准做法，`m1ddc` / BetterDisplay 都走这条�
 
 ### 为什么不用 HDMI-CEC
 
-方向反了。CEC 是让设备之间互相通知，不是让你从电脑精确指定「切到第几个输入口」。而且 Mac 本身不发送 CEC 命令。
+方向反了。CEC 是让设备之间互相通知，不是让你从电脑精确指定「切到第几个输入口」。而且 PC 本身不发送 CEC 命令。
 
 顺带一提：如果你的显示器接游戏机，**进显示器设置里关掉「CEC 一键关机 / 设备自动关机联动」，保留「CEC 开机联动」**，就能解决「电脑休眠把游戏机一起关掉」的问题——这跟切源是两件事，建议一起处理。
 
@@ -212,16 +288,46 @@ DDC/CI 是显示器切源的标准做法，`m1ddc` / BetterDisplay 都走这条�
 ## 已知限制
 
 - **DP / USB-C 的源名未在所有机型验证**，需要按你的设备实际试
-- `action=capturescreen`（截屏）在 HDMI 输入下无效，因为此时 TV 系统在后台，只返回几十字节的 JSON
+- `action=capturescreen`（截屏）在 HDMI 输入下无效，因为此时 TV 系统在后台
 - 部分设备的 ADB(5555)、Android TV Remote(6466/6467) 是关的，本工具不依赖它们
 - 小米电视助手协议是非公开接口，**系统更新后可能发生变化**。真改了就退回 `keyevent` 模拟按键
-- 只在 macOS 上实现。Windows 用户可以用等价的 HTTP 请求自己包一层
+- Windows 版与 macOS 版逻辑一致，但尚未在大量机型上长期验证，遇到问题欢迎提 issue
+- macOS 版走「菜单栏常驻」形态，没有 Dock 图标
+
+## 从源码构建 / CI
+
+仓库带了 GitHub Actions（`.github/workflows/build.yml`）：
+
+- 推到 `main` 或提 PR 时，自动在 `windows-latest` 和 `macos-latest` 上编译，产物上传为 artifact
+- 打 `v*` 标签时，自动创建 Release 并附上两个平台的产物
+
+```
+MiTVSwitch/
+├── macos/
+│   ├── main.swift        菜单栏 App（AppKit + Carbon 热键）
+│   ├── Info.plist
+│   ├── build.sh          swiftc 一键编译打包
+│   └── mitsw             命令行工具
+├── windows/
+│   ├── Program.cs        入口 + 单实例
+│   ├── TrayApp.cs        托盘图标、菜单、热键、动作
+│   ├── HotkeyWindow.cs   WM_HOTKEY / WM_POWERBROADCAST 接收窗口
+│   ├── TvClient.cs       6095 接口调用 + 局域网发现
+│   ├── Settings.cs       配置读写 + 开机自启
+│   ├── Prompt.cs         两个小对话框
+│   ├── MiTVSwitch.csproj
+│   ├── build.bat
+│   └── switch.ps1        命令行工具
+└── .github/workflows/build.yml
+```
 
 ## 安全性
 
 - 工具只在局域网内发 HTTP GET，不联网、不上报
 - 设备端无鉴权：能访问到 6095 端口的人都能控制它。**不要把 6095 端口映射到公网**
-- 日志写在 `~/Library/Logs/MiTVSwitch.log`，只记请求结果，不含任何隐私数据
+- 日志只记请求结果，不含任何隐私数据
+  - macOS：`~/Library/Logs/MiTVSwitch.log`
+  - Windows：`%APPDATA%\MiTVSwitch\MiTVSwitch.log`
 
 ---
 

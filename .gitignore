@@ -2,6 +2,10 @@
 MiTVSwitch.app/
 *.app
 .objects/
+dist/
+bin/
+obj/
+*.pdb
 
 # 本地配置与日志
 *.log
