@@ -74,7 +74,22 @@ jobs:
           cp dist/MiTVSwitch-win-x64/MiTVSwitch.exe files/MiTVSwitch-win-x64.exe
           cp dist/MiTVSwitch-macos/MiTVSwitch-macos.zip files/
 
+      # 如果这个 tag 已经有 Release 了（比如手动发过），就跳过，
+      # 避免同名产物重复上传导致 422 报错。
+      - name: 检查是否已存在同名 Release
+        id: exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "${{ github.ref_name }}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "Release ${{ github.ref_name }} 已存在，跳过发布步骤。"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: softprops/action-gh-release@v2
+        if: steps.exists.outputs.found == 'false'
         with:
           files: files/*
           generate_release_notes: true
