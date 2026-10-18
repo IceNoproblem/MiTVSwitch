@@ -1,4 +1,5 @@
 #!/bin/zsh
+# SPDX-License-Identifier: CC-BY-NC-SA-4.0
 # MiTVSwitch 命令行版
 #
 # 地址来源（优先级从高到低）：

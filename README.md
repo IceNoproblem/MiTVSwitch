@@ -9,6 +9,8 @@
 | macOS | 菜单栏 App（Swift / AppKit） | `⌃⌥1` / `⌃⌥2` |
 | Windows | 托盘 App（C# / WinForms） | `Ctrl+Alt+1` / `Ctrl+Alt+2` |
 
+> **授权**：**CC BY-NC-SA 4.0** —— 必须署名 · 禁止商用 · 衍生作品必须开源。详见 [License](#license)。
+
 ---
 
 ## 这个项目解决什么问题

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: CC-BY-NC-SA-4.0
 <#
 .SYNOPSIS
     MiTVSwitch 命令行版 —— 小米 / 红米电视与智能显示器信号源切换

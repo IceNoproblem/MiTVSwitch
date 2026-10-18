@@ -1,7 +1,7 @@
 //
 //  MiTVSwitch — 小米 / 红米电视与智能显示器的信号源一键切换
 //
-//  MIT License
+//  SPDX-License-Identifier: CC-BY-NC-SA-4.0
 //
 
 import Cocoa
