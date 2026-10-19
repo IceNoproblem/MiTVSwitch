@@ -88,8 +88,9 @@ jobs:
             echo "found=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # 不设 generate_release_notes：这样 Release 正文取的是 annotated tag 的说明文字，
+      # 打 tag 时写清楚发版内容即可，不用再单独维护一份。
       - uses: softprops/action-gh-release@v2
         if: steps.exists.outputs.found == 'false'
         with:
           files: files/*
-          generate_release_notes: true
