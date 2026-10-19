@@ -22,7 +22,7 @@ namespace MiTVSwitch
         //  想改信号源名字、增减接口，改这张表就行。
         //  Key   : 源名，大小写不敏感；程序启动时用 getsources 解析成编号
         //  Title : 界面里显示的名字
-        //  默认快捷键在 Hotkeys.Defaults() 里，用户可在控制面板里改。
+        //  默认快捷键在 Hotkeys.Defaults() 里，用户可在设置面板里改。
         //  数组第 1、2 项同时是「睡眠切换」的目标：
         //  睡眠时切到第 1 项，唤醒后切回第 2 项。
         // ───────────────────────────────────────────────────────────
@@ -48,6 +48,7 @@ namespace MiTVSwitch
         private ToolStripMenuItem? _header;
         private bool _busy;
         private PanelForm? _panel;
+        private System.Threading.Timer? _autoSceneTimer;
 
         public TrayApp()
         {
@@ -70,8 +71,26 @@ namespace MiTVSwitch
 
             RegisterAllHotkeys();
 
+            // 先探一下 DDC/CI 能不能读写（只读不写，不会动背光），再决定亮度走哪条路
+            bool ddcOK = Ddc.Probe();
+            Log($"DDC 探活：{(ddcOK ? "可用，亮度走硬件背光" : "不可用，亮度走软件调光")}");
+
             // 恢复上次的调光 / 色温
-            if (Settings.GammaLevel != 0 || Settings.GammaTemp != 0) ApplyPicture();
+            if (Picture.Percent != 100 || Picture.TempIndex != 0) Picture.Apply();
+
+            // 屏幕时间：30 秒采样一次（回调在定时器线程，必须切回 UI 线程再碰控件）
+            Usage.Changed += OnUsageChanged;
+            Usage.Start();
+            Microsoft.Win32.SystemEvents.SessionSwitch += (_, e) =>
+            {
+                Usage.ScreenLocked = e.Reason == Microsoft.Win32.SessionSwitchReason.SessionLock;
+            };
+
+            // 自动场景：每分钟看一眼是否该切日间 / 夜间
+            Picture.CheckAutoScene(force: true);
+            _autoSceneTimer = new System.Threading.Timer(_ => Picture.CheckAutoScene(), null, 60_000, 60_000);
+
+            Picture.Changed += OnPictureChanged;
 
             if (string.IsNullOrWhiteSpace(Settings.Host))
                 PromptForHost();
@@ -102,7 +121,7 @@ namespace MiTVSwitch
         {
             var menu = new ContextMenuStrip();
 
-            var panelItem = new ToolStripMenuItem("打开控制面板…");
+            var panelItem = new ToolStripMenuItem("打开设置面板…");
             panelItem.Font = new Font(panelItem.Font, FontStyle.Bold);
             panelItem.Click += (_, _) => ShowPanel();
             menu.Items.Add(panelItem);
@@ -152,36 +171,48 @@ namespace MiTVSwitch
             volume.DropDownItems.Add(volShow);
             menu.Items.Add(volume);
 
-            // 画面：软件调光 + 色温（改显卡 Gamma 表，任何显示器都能用）
-            var picture = new ToolStripMenuItem("画面（软件调光 / 色温）");
-            for (int i = 0; i < Gamma.BrightnessNames.Length; i++)
+            // 画面：亮度（DDC 硬件背光优先，否则软件调光）+ 色温 + 场景
+            var picture = new ToolStripMenuItem("画面");
+            picture.DropDownItems.Add(new ToolStripMenuItem(
+                Ddc.Working ? "亮度（硬件背光）" : "亮度（软件调光）") { Enabled = false });
+
+            for (int i = 0; i < Picture.PresetPercents.Length; i++)
             {
-                int idx = i;
-                var it = new ToolStripMenuItem($"亮度 {Gamma.BrightnessNames[i]}")
+                int pct = Picture.PresetPercents[i];
+                var it = new ToolStripMenuItem($"   {pct}%")
                 {
-                    Checked = Settings.GammaLevel == i,
+                    Checked = Math.Abs(Picture.Percent - pct) <= 1,
                 };
-                it.Click += (_, _) => { Settings.GammaLevel = idx; ApplyPicture(); RebuildMenu(); };
+                it.Click += (_, _) => { Picture.SetBrightnessPercent(pct); RebuildMenu(); };
                 picture.DropDownItems.Add(it);
             }
+
             picture.DropDownItems.Add(new ToolStripSeparator());
-            for (int i = 0; i < Gamma.TempNames.Length; i++)
+            for (int i = 0; i < Picture.TempNames.Length; i++)
             {
                 int idx = i;
-                var it = new ToolStripMenuItem(Gamma.TempNames[i])
+                var it = new ToolStripMenuItem(Picture.TempNames[i])
                 {
-                    Checked = Settings.GammaTemp == i,
+                    Checked = Picture.TempIndex == i,
                 };
-                it.Click += (_, _) => { Settings.GammaTemp = idx; ApplyPicture(); RebuildMenu(); };
+                it.Click += (_, _) => { Picture.TempIndex = idx; Picture.Apply(); RebuildMenu(); };
                 picture.DropDownItems.Add(it);
             }
+
+            picture.DropDownItems.Add(new ToolStripSeparator());
+            for (int i = 0; i < Picture.Scenes.Length; i++)
+            {
+                int idx = i;
+                var it = new ToolStripMenuItem("场景：" + Picture.Scenes[i].Name);
+                it.Click += (_, _) => { Picture.ApplyScene(idx); RebuildMenu(); };
+                picture.DropDownItems.Add(it);
+            }
+
             picture.DropDownItems.Add(new ToolStripSeparator());
             var resetPic = new ToolStripMenuItem("恢复原始画面");
             resetPic.Click += (_, _) =>
             {
-                Settings.GammaLevel = 0;
-                Settings.GammaTemp = 0;
-                Gamma.Restore();
+                Picture.Reset();
                 RebuildMenu();
             };
             picture.DropDownItems.Add(resetPic);
@@ -242,26 +273,21 @@ namespace MiTVSwitch
 
         internal static void ApplyPicture()
         {
-            int lv = Math.Clamp(Settings.GammaLevel, 0, Gamma.BrightnessSteps.Length - 1);
-            int tp = Math.Clamp(Settings.GammaTemp, 0, Gamma.TempValues.Length - 1);
-            bool ok = Gamma.Apply(Gamma.BrightnessSteps[lv], Gamma.TempValues[tp]);
-            Log($"画面：亮度 {Gamma.BrightnessNames[lv]}，色温 {Gamma.TempNames[tp]} -> {(ok ? "OK" : "显卡不接受")}");
+            Picture.Apply();
         }
 
         /// <summary>面板里改了画面参数后调用</summary>
         internal void PictureChanged()
         {
-            ApplyPicture();
+            Picture.Apply();
             RebuildMenu();
         }
 
-        private void StepBrightness(int delta)
+        private void StepBrightness(double delta)
         {
-            int next = Math.Clamp(Settings.GammaLevel + delta, 0, Gamma.BrightnessSteps.Length - 1);
-            if (next == Settings.GammaLevel) return;
-            Settings.GammaLevel = next;
-            ApplyPicture();
-            RebuildMenu();
+            double before = Picture.Percent;
+            Picture.StepBrightness(delta);
+            if (Math.Abs(Picture.Percent - before) > 0.5) RebuildMenu();
         }
 
         private async Task VolumeAsync(bool up)
@@ -397,17 +423,33 @@ namespace MiTVSwitch
             {
                 case "vol.up": _ = VolumeAsync(true); break;
                 case "vol.down": _ = VolumeAsync(false); break;
-                case "bright.up": StepBrightness(-1); break;
-                case "bright.down": StepBrightness(+1); break;
+                case "bright.up": StepBrightness(+5); break;
+                case "bright.down": StepBrightness(-5); break;
             }
         }
 
-        internal void ShowPanel()
+        // ── 面板回调（都可能来自非 UI 线程）────────────────────
+
+        private void OnUsageChanged()
         {
+            var p = _panel;
+            if (p is null || p.IsDisposed) return;
+            try { p.BeginInvoke(new Action(p.RefreshUsageChart)); } catch { }
+        }
+
+        private void OnPictureChanged()
+        {
+            var p = _panel;
+            if (p is null || p.IsDisposed) return;
+            try { p.BeginInvoke(new Action(p.RefreshAfterExternalChange)); } catch { }
+        }
+
+        internal void ShowPanel()        {
             if (_panel is null || _panel.IsDisposed)
                 _panel = new PanelForm(this);
 
             _panel.Rebuild();
+            _panel.RefreshUsageChart();
             _panel.Show();
             _panel.WindowState = FormWindowState.Normal;
             _panel.Activate();
@@ -416,6 +458,8 @@ namespace MiTVSwitch
         internal List<DeviceSource> CurrentSources => _sources;
 
         internal void TestConnectionAndReport() => _ = TestAsync();
+
+        internal void DiscoverDevices() => _ = DiscoverAsync();
 
         internal void RefreshSourcesAsync()
         {
@@ -595,7 +639,10 @@ namespace MiTVSwitch
 
         private void ExitApp()
         {
+            _autoSceneTimer?.Dispose();
+            Usage.Stop();
             Gamma.Restore();
+            Ddc.Close();
             UnregisterAllHotkeys();
             _tray.Visible = false;
             _tray.Dispose();
@@ -607,7 +654,7 @@ namespace MiTVSwitch
 
         private static string LogPath => Path.Combine(Settings.DataDir, "MiTVSwitch.log");
 
-        private static void Log(string msg)
+        internal static void Log(string msg)
         {
             try
             {

@@ -38,9 +38,29 @@ Licensed under the MIT License (全文见本文件末尾)
 但保留此声明既是对原作者的致谢，也便于溯源。
 
 ────────────────────────────────────────────────────────────────────────
+
+MonitorControl
+https://github.com/MonitorControl/MonitorControl
+Copyright (c) MonitorControl 贡献者
+Licensed under the MIT License (全文见本文件末尾)
+
+macOS 端通过 IOAVService 读写显示器 I²C 的 DDC/CI 实现参考了其
+Arm64DDC.swift 的报文格式与重试策略：
+
+- 报文结构 [0x80|len, len, ...data, checksum]
+- Set VCP 亮度：0x84 0x03 0x10 <hi> <lo> <chk>
+- Get VCP 亮度：0x82 0x01 0x10 <chk>，随后从 offset 0 读 11 字节
+- 校验和种子：3 字节报文 (0x37<<1)^0x51，1 字节报文 (0x37<<1)，回包 0x50
+- 单次写容易失败，需要写 2 轮 × 最多 5 次重试并留 10~20ms 间隔
+
+MiTVSwitch 的版本以 Swift 重写并做了裁剪（只实现亮度 VCP 0x10），
+未直接复制其源码。Windows 端走系统自带的 dxva2，与该项目无关。
+
+────────────────────────────────────────────────────────────────────────
 MIT License
 
 Copyright (c) 2026 binaryify
+Copyright (c) MonitorControl 贡献者
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

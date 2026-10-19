@@ -79,11 +79,15 @@ namespace MiTVSwitch
             catch { }
         }
 
-        /// <summary>软件调光的亮度档位下标</summary>
-        public static int GammaLevel
+        /// <summary>亮度百分比，30…100（没存过就是 100）</summary>
+        public static int BrightnessPercent
         {
-            get => ReadInt("gamma-level");
-            set => WriteInt("gamma-level", value);
+            get
+            {
+                int v = ReadInt("brightness");
+                return v == 0 ? 100 : Math.Clamp(v, 30, 100);
+            }
+            set => WriteInt("brightness", Math.Clamp(value, 30, 100));
         }
 
         /// <summary>色温档位下标</summary>
@@ -91,6 +95,46 @@ namespace MiTVSwitch
         {
             get => ReadInt("gamma-temp");
             set => WriteInt("gamma-temp", value);
+        }
+
+        private static string SceneFlagPath => FlagPath("autoscene");
+
+        /// <summary>按时间自动切换日间 / 夜间场景</summary>
+        public static bool AutoScene
+        {
+            get => File.Exists(SceneFlagPath);
+            set
+            {
+                try
+                {
+                    Directory.CreateDirectory(DataDir);
+                    if (value) File.WriteAllText(SceneFlagPath, "");
+                    else if (File.Exists(SceneFlagPath)) File.Delete(SceneFlagPath);
+                }
+                catch { }
+            }
+        }
+
+        /// <summary>白天开始的分钟数，默认 08:00</summary>
+        public static int SceneDayMinutes
+        {
+            get
+            {
+                int v = ReadInt("scene-day");
+                return v == 0 ? 8 * 60 : Math.Clamp(v, 0, 1439);
+            }
+            set => WriteInt("scene-day", Math.Clamp(value, 0, 1439));
+        }
+
+        /// <summary>夜间开始的分钟数，默认 20:00</summary>
+        public static int SceneNightMinutes
+        {
+            get
+            {
+                int v = ReadInt("scene-night");
+                return v == 0 ? 20 * 60 : Math.Clamp(v, 0, 1439);
+            }
+            set => WriteInt("scene-night", Math.Clamp(value, 0, 1439));
         }
 
         /// <summary>开机自启：写 HKCU 的 Run 键，不需要管理员权限</summary>

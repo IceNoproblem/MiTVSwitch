@@ -11,8 +11,6 @@ namespace MiTVSwitch
     /// </summary>
     internal static class Gamma
     {
-        public static readonly double[] BrightnessSteps = { 1.0, 0.85, 0.70, 0.55 };
-        public static readonly string[] BrightnessNames = { "100%", "85%", "70%", "55%" };
         public static readonly double[] TempValues = { 6500, 5000, 4000 };
         public static readonly string[] TempNames = { "标准 6500K", "暖 5000K", "夜间 4000K" };
 

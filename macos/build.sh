@@ -11,8 +11,9 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp Info.plist "$APP/Contents/Info.plist"
 
 echo "编译中…"
-xcrun swiftc -O main.swift -o "$APP/Contents/MacOS/$BIN" \
-  -framework Cocoa -framework Carbon -framework ServiceManagement
+xcrun swiftc -O main.swift Panel.swift Display.swift Usage.swift \
+  -o "$APP/Contents/MacOS/$BIN" \
+  -framework Cocoa -framework Carbon -framework ServiceManagement -framework IOKit
 
 codesign --force --deep --sign - "$APP" 2>/dev/null || true
 

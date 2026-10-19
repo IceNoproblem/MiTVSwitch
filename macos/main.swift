@@ -21,7 +21,7 @@ let kAutoSleepKey = "autoOnSleep"
 //
 // key   : 源名，大小写不敏感；程序启动时用 getsources 解析成设备上的编号
 // title : 界面里显示的名字
-// hotkey: 默认快捷键，用户可在控制面板里改
+// hotkey: 默认快捷键，用户可在设置面板里改
 //         按自己的设备改这里的顺序和名字即可。
 
 struct HotkeySpec {
@@ -140,7 +140,7 @@ func keyName(_ code: UInt32) -> String {
     }
 }
 
-/// 所有可绑定快捷键的动作，控制面板和注册逻辑共用
+/// 所有可绑定快捷键的动作，设置面板和注册逻辑共用
 struct HotkeyAction {
     let id: String
     let title: String
@@ -168,13 +168,13 @@ func runAction(_ action: String) {
     switch action {
     case "vol.up":      stepVolume(up: true)
     case "vol.down":    stepVolume(up: false)
-    case "bright.up":   if gammaLevelIndex > 0 { gammaLevelIndex -= 1; applyGammaPreset() }
-    case "bright.down": if gammaLevelIndex < kBrightnessSteps.count - 1 { gammaLevelIndex += 1; applyGammaPreset() }
+    case "bright.up":   stepBrightness(+5)
+    case "bright.down": stepBrightness(-5)
     default: break
     }
     DispatchQueue.main.async {
         AppDelegate.shared.buildMenu()
-        PanelController.shared.refresh()
+        SettingsPanel.shared.syncPicture()
     }
 }
 
@@ -547,13 +547,34 @@ func discoverTVs(progress: @escaping (Int) -> Void) -> [(ip: String, name: Strin
 // 代价是压得越暗对比度越低。退出时恢复原始曲线。
 // 思路与档位设计参考 MonitorBar（MIT，© 2026 binaryify），见 NOTICE。
 
-let kGammaLevelKey = "gammaLevel"
+// 注意：这个 key 与 v1.2 的档位序号 key 不能复用 —— 旧值是个 0…3 的整数，
+// 按 Double 读出来会被当成 0%…3%，亮度直接黑屏。换新 key 让旧值自然失效。
+let kGammaLevelKey = "gammaBrightnessLevel"  // 0.30 ... 1.00
 let kGammaTempKey  = "gammaTemp"
+let kAutoSceneKey  = "autoScene"
+let kSceneDayKey   = "sceneDayMinutes"      // 从 0 点起的分钟数
+let kSceneNightKey = "sceneNightMinutes"
 
-let kBrightnessSteps: [Double] = [1.0, 0.85, 0.70, 0.55]
+let kMinBrightness: Double = 0.30
+/// 菜单里的快捷档位（面板上是连续滑动条）
 let kBrightnessNames = ["100%", "85%", "70%", "55%"]
+let kBrightnessPercents: [Double] = [100, 85, 70, 55]
 let kTempValues: [Double] = [6500, 5000, 4000]
 let kTempNames = ["标准 6500K", "暖 5000K", "夜间 4000K"]
+
+/// 场景 = 亮度 + 色温的组合，普通显示器也能用（纯 Gamma）
+struct Scene {
+    let name: String
+    let brightness: Double
+    let tempIndex: Int
+}
+
+let kScenes: [Scene] = [
+    Scene(name: "日间", brightness: 1.00, tempIndex: 0),
+    Scene(name: "阅读", brightness: 0.85, tempIndex: 1),
+    Scene(name: "观影", brightness: 0.70, tempIndex: 2),
+    Scene(name: "夜间", brightness: 0.55, tempIndex: 2),
+]
 
 private var origRed   = [CGGammaValue]()
 private var origGreen = [CGGammaValue]()
@@ -612,9 +633,15 @@ func restoreGamma() {
     CGSetDisplayTransferByTable(CGMainDisplayID(), UInt32(n), &origRed, &origGreen, &origBlue)
 }
 
-var gammaLevelIndex: Int {
-    get { min(max(UserDefaults.standard.integer(forKey: kGammaLevelKey), 0), kBrightnessSteps.count - 1) }
-    set { UserDefaults.standard.set(newValue, forKey: kGammaLevelKey) }
+/// 亮度是连续值（0.30 ... 1.00），没存过就是 100%
+var gammaBrightness: Double {
+    get {
+        if let v = UserDefaults.standard.object(forKey: kGammaLevelKey) as? Double {
+            return min(1.0, max(kMinBrightness, v))
+        }
+        return 1.0
+    }
+    set { UserDefaults.standard.set(min(1.0, max(kMinBrightness, newValue)), forKey: kGammaLevelKey) }
 }
 
 var gammaTempIndex: Int {
@@ -622,10 +649,108 @@ var gammaTempIndex: Int {
     set { UserDefaults.standard.set(newValue, forKey: kGammaTempKey) }
 }
 
-/// 把当前档位应用到屏幕上
-func applyGammaPreset() {
-    applyGamma(level: kBrightnessSteps[gammaLevelIndex], kelvin: kTempValues[gammaTempIndex])
-    logLine("画面：亮度 \(kBrightnessNames[gammaLevelIndex])，色温 \(kTempNames[gammaTempIndex])")
+private var ddcWork: DispatchWorkItem?
+/// 是否已经尝试过硬写背光。试过且失败就不再反复试，直接走软件调光。
+private var hardwareTried = false
+
+/// 硬件背光写入有延迟，拖动滑动条时合并成最后一次，避免把 I²C 打满
+func pushHardwareBrightness(_ percent: Int) {
+    ddcWork?.cancel()
+    let w = DispatchWorkItem {
+        hardwareTried = true
+        let ok = DDC.shared.setBrightness(percent)
+        if !ok {
+            // 硬件不通，立刻退回软件调光，别让用户对着没反应的滑动条发呆
+            applyGamma(level: gammaBrightness, kelvin: kTempValues[gammaTempIndex])
+            logLine("DDC 写入失败，改走软件调光")
+        }
+        SettingsPanel.shared.syncPicture()
+    }
+    ddcWork = w
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: w)
+}
+
+/// 把当前的亮度 / 色温套到屏幕上。
+///
+/// 两条路：DDC/CI 能写就调硬件背光（Gamma 只负责色温），写不了就整块 Gamma 软件调光。
+/// 所以「支持 DDC 的显示器」和「什么协议都不支持的普通显示器」用的是同一套界面。
+func applyPicture() {
+    let kelvin = kTempValues[gammaTempIndex]
+    let ddcWorthTrying = DDC.shared.available && (DDC.shared.working || !hardwareTried)
+    if ddcWorthTrying {
+        applyGamma(level: 1.0, kelvin: kelvin)     // 亮度交给背光，Gamma 只管色温
+        pushHardwareBrightness(Int((gammaBrightness * 100).rounded()))
+    } else {
+        applyGamma(level: gammaBrightness, kelvin: kelvin)
+    }
+}
+
+/// 当前亮度走的是哪条路（给面板显示）
+var brightnessBackendLabel: String {
+    if DDC.shared.working { return "硬件背光（DDC/CI）" }
+    if !DDC.shared.probed { return "正在探测…" }
+    return "软件调光（Gamma）"
+}
+
+/// 设置亮度百分比（30 ... 100）
+func setBrightnessPercent(_ percent: Double) {
+    gammaBrightness = percent / 100
+    applyPicture()
+}
+
+/// 相对调整亮度，delta 是百分点
+func stepBrightness(_ delta: Double) {
+    setBrightnessPercent(gammaBrightness * 100 + delta)
+}
+
+/// 套用第 index 个场景
+func applyScene(_ index: Int) {
+    guard index >= 0 && index < kScenes.count else { return }
+    let s = kScenes[index]
+    gammaBrightness = s.brightness
+    gammaTempIndex = s.tempIndex
+    applyPicture()
+    logLine("场景：\(s.name)（亮度 \(Int((gammaBrightness * 100).rounded()))%，\(kTempNames[gammaTempIndex])）")
+}
+
+// MARK: - 按时间自动切换场景
+
+func minutesOfDay(_ d: Date) -> Int {
+    let c = Calendar.current.dateComponents([.hour, .minute], from: d)
+    return (c.hour ?? 0) * 60 + (c.minute ?? 0)
+}
+
+var sceneDayMinutes: Int {
+    get { UserDefaults.standard.object(forKey: kSceneDayKey) as? Int ?? 8 * 60 }
+    set { UserDefaults.standard.set(newValue, forKey: kSceneDayKey) }
+}
+
+var sceneNightMinutes: Int {
+    get { UserDefaults.standard.object(forKey: kSceneNightKey) as? Int ?? 20 * 60 }
+    set { UserDefaults.standard.set(newValue, forKey: kSceneNightKey) }
+}
+
+private var lastAutoSceneIsNight: Bool?
+
+/// 到点就切场景。force = 用户刚改过开关或时间，立刻重算一次。
+func checkAutoScene(force: Bool = false) {
+    guard UserDefaults.standard.bool(forKey: kAutoSceneKey) else {
+        lastAutoSceneIsNight = nil
+        return
+    }
+    let now = minutesOfDay(Date())
+    let day = sceneDayMinutes, night = sceneNightMinutes
+    // 白天区间算 [day, night)；若用户把夜间设得比白天早（跨夜），按补集处理
+    let isNight: Bool
+    if day <= night {
+        isNight = !(now >= day && now < night)
+    } else {
+        isNight = (now >= night && now < day)
+    }
+    guard force || lastAutoSceneIsNight != isNight else { return }
+    lastAutoSceneIsNight = isNight
+    applyScene(isNight ? 3 : 0)      // 3 = 夜间，0 = 日间
+    SettingsPanel.shared.syncPicture()
 }
 
 /// 把一个子菜单挂到条目上
@@ -644,6 +769,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     var statusItem: NSStatusItem!
     var busy = false
+    var autoSceneTimer: Timer?
 
     func applicationDidFinishLaunching(_ note: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -655,9 +781,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         registerHotKeys()
         observeSleepWake()
 
-        // 恢复上次的调光 / 色温。系统重启或换显示器后 Gamma 会复位，所以每次启动都重新套一遍。
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            if gammaLevelIndex != 0 || gammaTempIndex != 0 { applyGammaPreset() }
+        // 屏幕时间：30 秒采样一次，面板开着时同步刷新图表
+        UsageTracker.shared.onChange = { SettingsPanel.shared.refreshUsage() }
+        UsageTracker.shared.start()
+
+        // 先探一下 DDC/CI 能不能读写（只读不写，不会动背光），再决定亮度走哪条路。
+        // 系统重启或换显示器后 Gamma 会复位，所以每次启动都重新套一遍。
+        DispatchQueue.global().async {
+            let ddcOK = DDC.shared.probe()
+            logLine("DDC 探活：\(ddcOK ? "可用，亮度走硬件背光" : "不可用，亮度走软件调光")")
+            DispatchQueue.main.async {
+                if gammaBrightness < 0.999 || gammaTempIndex != 0 { applyPicture() }
+                SettingsPanel.shared.syncPicture()
+            }
+        }
+
+        // 自动场景：每分钟看一眼是否该切日间 / 夜间
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { checkAutoScene(force: true) }
+        autoSceneTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in
+            checkAutoScene()
         }
 
         if tvHost.isEmpty {
@@ -674,6 +816,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ note: Notification) {
+        autoSceneTimer?.invalidate()
+        UsageTracker.shared.stop()
         restoreGamma()
     }
 
@@ -682,7 +826,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func buildMenu() {
         let menu = NSMenu()
 
-        let panelItem = NSMenuItem(title: "打开控制面板…", action: #selector(openPanel), keyEquivalent: "")
+        let panelItem = NSMenuItem(title: "打开设置面板…", action: #selector(openPanel), keyEquivalent: "")
         panelItem.target = self
         menu.addItem(panelItem)
 
@@ -718,14 +862,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         volShow.target = self
         menu.addItem(submenu("音量", [volUp, volDown, .separator(), volShow]))
 
-        // 画面：软件调光 + 色温
+        // 画面：亮度（DDC 硬件背光优先，否则软件调光）+ 色温
         var picItems: [NSMenuItem] = []
+        let hw = DDC.shared.working
+        let briHead = NSMenuItem(title: hw ? "亮度（硬件背光）" : "亮度（软件调光）", action: nil, keyEquivalent: "")
+        briHead.isEnabled = false
+        picItems.append(briHead)
         for (i, name) in kBrightnessNames.enumerated() {
-            let it = NSMenuItem(title: "亮度 \(name)",
+            let it = NSMenuItem(title: "   \(name)",
                                 action: #selector(pickBrightness(_:)), keyEquivalent: "")
             it.tag = i
             it.target = self
-            it.state = (i == gammaLevelIndex) ? .on : .off
+            it.state = abs(gammaBrightness * 100 - kBrightnessPercents[i]) < 0.6 ? .on : .off
             picItems.append(it)
         }
         picItems.append(.separator())
@@ -740,7 +888,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let resetPic = NSMenuItem(title: "恢复原始画面", action: #selector(resetPicture(_:)), keyEquivalent: "")
         resetPic.target = self
         picItems.append(resetPic)
-        menu.addItem(submenu("画面（软件调光 / 色温）", picItems))
+        menu.addItem(submenu("画面", picItems))
 
         let comp = NSMenuItem(title: "切换 320Hz 竞技模式", action: #selector(toggleCompetitive(_:)), keyEquivalent: "")
         comp.target = self
@@ -786,7 +934,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func openPanel() {
-        PanelController.shared.show()
+        SettingsPanel.shared.show()
     }
 
     func performSwitch(_ key: String) {
@@ -839,23 +987,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func pickBrightness(_ sender: NSMenuItem) {
-        gammaLevelIndex = sender.tag
-        applyGammaPreset()
+        guard sender.tag >= 0 && sender.tag < kBrightnessPercents.count else { return }
+        setBrightnessPercent(kBrightnessPercents[sender.tag])
         buildMenu()
+        SettingsPanel.shared.syncPicture()
     }
 
     @objc func pickTemp(_ sender: NSMenuItem) {
         gammaTempIndex = sender.tag
-        applyGammaPreset()
+        applyPicture()
         buildMenu()
+        SettingsPanel.shared.syncPicture()
     }
 
     @objc func resetPicture(_ sender: Any?) {
-        gammaLevelIndex = 0
+        setBrightnessPercent(100)
         gammaTempIndex = 0
-        restoreGamma()
+        applyPicture()
         buildMenu()
-        logLine("画面已恢复原始曲线")
+        SettingsPanel.shared.syncPicture()
+        logLine("画面已恢复")
     }
 
     @objc func toggleCompetitive(_ sender: Any?) {
@@ -1027,7 +1178,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let nc = NSWorkspace.shared.notificationCenter
         nc.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { _ in
             // 唤醒后 Gamma 不一定还在，重新套一遍
-            if gammaLevelIndex != 0 || gammaTempIndex != 0 { applyGammaPreset() }
+            if gammaBrightness < 0.999 || gammaTempIndex != 0 { applyPicture() }
             guard UserDefaults.standard.bool(forKey: kAutoSleepKey) else { return }
             if allSources.count > 1 { self.performSwitch(allSources[1].key) }
         }
@@ -1055,336 +1206,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             alert("开机启动设置失败", "\(error.localizedDescription)\n\n请先把 App 放到 /Applications 后再试。")
         }
-    }
-}
-
-// MARK: - 控制面板
-
-func carbonMods(_ f: NSEvent.ModifierFlags) -> UInt32 {
-    var m: UInt32 = 0
-    if f.contains(.control) { m |= UInt32(controlKey) }
-    if f.contains(.option)  { m |= UInt32(optionKey) }
-    if f.contains(.shift)   { m |= UInt32(shiftKey) }
-    if f.contains(.command) { m |= UInt32(cmdKey) }
-    return m
-}
-
-/// 捕获一次按键，用于录制快捷键
-final class KeyCaptureView: NSView {
-    var onCapture: ((HotkeySpec?) -> Void)?
-    override var acceptsFirstResponder: Bool { true }
-
-    override func draw(_ dirtyRect: NSRect) {
-        NSColor.windowBackgroundColor.setFill()
-        dirtyRect.fill()
-    }
-
-    func addHint(_ title: String) {
-        let l = NSTextField(wrappingLabelWithString:
-            "\(title)\n\n按下新的组合键（需含 ⌃ ⌥ ⇧ ⌘ 至少一个）\nEsc 取消 · Delete 清除绑定")
-        l.alignment = .center
-        l.frame = NSRect(x: 24, y: 24, width: 292, height: 96)
-        l.autoresizingMask = [.width, .height]
-        addSubview(l)
-    }
-
-    override func keyDown(with event: NSEvent) {
-        if event.keyCode == UInt16(kVK_Escape) { onCapture?(nil); return }
-        if event.keyCode == UInt16(kVK_Delete) || event.keyCode == UInt16(kVK_ForwardDelete) {
-            onCapture?(HotkeySpec(keyCode: 0, mods: 0))   // 0/0 表示清除
-            return
-        }
-        let mods = carbonMods(event.modifierFlags)
-        if mods == 0 {
-            NSSound.beep()      // 单个按键不做全局热键
-            return
-        }
-        onCapture?(HotkeySpec(keyCode: UInt32(event.keyCode), mods: mods))
-    }
-}
-
-final class PanelController: NSObject {
-    static let shared = PanelController()
-
-    private var window: NSWindow?
-    private var volumeLabel: NSTextField?
-    private var deviceLabel: NSTextField?
-
-    func toggle() {
-        if window?.isVisible == true { hide() } else { show() }
-    }
-
-    func hide() { window?.orderOut(nil) }
-
-    func show() {
-        let view = buildContent()
-        if window == nil {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 380, height: 200),
-                             styleMask: [.titled, .closable],
-                             backing: .buffered, defer: false)
-            w.title = "MiTVSwitch"
-            w.isReleasedWhenClosed = false
-            w.level = .floating
-            window = w
-        }
-        window?.contentView = view
-        window?.setContentSize(view.frame.size)
-        window?.center()
-        window?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        refreshLiveInfo()
-    }
-
-    /// 面板开着时，动作执行后刷新数值
-    func refresh() {
-        guard let w = window, w.isVisible else { return }
-        let old = w.frame
-        let view = buildContent()
-        w.contentView = view
-        w.setContentSize(view.frame.size)
-        w.setFrameOrigin(old.origin)
-        refreshLiveInfo()
-    }
-
-    // ── 读取设备实时信息 ────────────────────────────────────
-
-    private func refreshLiveInfo() {
-        DispatchQueue.main.async { [weak self] in
-            self?.deviceLabel?.stringValue = tvHost.isEmpty
-                ? "未设置显示器地址"
-                : "设备 \(tvHost)"
-        }
-        guard !tvHost.isEmpty else { return }
-        DispatchQueue.global().async { [weak self] in
-            let name = deviceName(from: apiPath("/request?action=isalive").body)
-            let vol = readVolume()
-            if deviceSources.isEmpty { refreshSources() }
-            DispatchQueue.main.async {
-                if let n = name {
-                    self?.deviceLabel?.stringValue = n
-                }
-                if let v = vol {
-                    self?.volumeLabel?.stringValue = "\(v.value) / \(v.max)"
-                } else {
-                    self?.volumeLabel?.stringValue = "—"
-                }
-            }
-        }
-    }
-
-    // ── 布局辅助 ────────────────────────────────────────────
-
-    private func titleLabel(_ text: String) -> NSTextField {
-        let l = NSTextField(labelWithString: text)
-        l.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
-        l.textColor = .secondaryLabelColor
-        return l
-    }
-
-    private func bodyLabel(_ text: String, size: CGFloat = 12) -> NSTextField {
-        let l = NSTextField(labelWithString: text)
-        l.font = NSFont.systemFont(ofSize: size)
-        return l
-    }
-
-    private func button(_ title: String, _ action: Selector, tag: Int = 0, width: CGFloat = 0) -> NSButton {
-        let b = NSButton(title: title, target: self, action: action)
-        b.bezelStyle = .rounded
-        b.tag = tag
-        if width > 0 { b.widthAnchor.constraint(equalToConstant: width).isActive = true }
-        return b
-    }
-
-    private func row(_ views: [NSView]) -> NSStackView {
-        let s = NSStackView(views: views)
-        s.orientation = .horizontal
-        s.alignment = .centerY
-        s.spacing = 8
-        return s
-    }
-
-    // ── 主体 ────────────────────────────────────────────────
-
-    private func buildContent() -> NSView {
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 10
-
-        // 头部
-        let name = NSTextField(labelWithString: "MiTVSwitch")
-        name.font = NSFont.systemFont(ofSize: 17, weight: .semibold)
-        deviceLabel = bodyLabel(tvHost.isEmpty ? "未设置显示器地址" : "设备 \(tvHost)", size: 11)
-        deviceLabel?.textColor = .secondaryLabelColor
-        stack.addArrangedSubview(name)
-        if let d = deviceLabel { stack.addArrangedSubview(d) }
-
-        // 信号源
-        stack.addArrangedSubview(titleLabel("信号源"))
-        var srcViews: [NSView] = []
-        for s in allSources {
-            let has = deviceSources.isEmpty || resolveSourceID(s.key) != nil
-            let b = button(s.title, #selector(doSwitch(_:)), tag: 0, width: 84)
-            b.identifier = NSUserInterfaceItemIdentifier(s.key)
-            b.isEnabled = has
-            b.toolTip = has ? "切到 \(s.title)（\(formatHotkey(hotkey(for: "src.\(s.key)")))）"
-                            : "设备没有报告这个输入"
-            srcViews.append(b)
-        }
-        // 每行两个
-        for chunk in stride(from: 0, to: srcViews.count, by: 2).map({ Array(srcViews[$0..<min($0 + 2, srcViews.count)]) }) {
-            stack.addArrangedSubview(row(chunk))
-        }
-
-        // 音量
-        stack.addArrangedSubview(titleLabel("显示器音量"))
-        let volText = bodyLabel("—", size: 13)
-        volText.alignment = .center
-        volText.widthAnchor.constraint(greaterThanOrEqualToConstant: 72).isActive = true
-        volumeLabel = volText
-        let volRow = row([
-            button("−", #selector(volDown), width: 44),
-            volText,
-            button("+", #selector(volUp), width: 44),
-        ])
-        stack.addArrangedSubview(volRow)
-
-        // 画面
-        stack.addArrangedSubview(titleLabel("画面（软件调光 / 色温）"))
-        let seg = NSSegmentedControl(labels: kBrightnessNames, trackingMode: .selectOne,
-                                     target: self, action: #selector(brightnessChanged(_:)))
-        seg.selectedSegment = gammaLevelIndex
-        stack.addArrangedSubview(row([bodyLabel("亮度"), seg]))
-
-        let popup = NSPopUpButton(frame: .zero, pullsDown: false)
-        popup.addItems(withTitles: kTempNames)
-        popup.selectItem(at: gammaTempIndex)
-        popup.target = self
-        popup.action = #selector(tempChanged(_:))
-        popup.widthAnchor.constraint(equalToConstant: 140).isActive = true
-        stack.addArrangedSubview(row([bodyLabel("色温"), popup]))
-
-        // 快捷键
-        stack.addArrangedSubview(titleLabel("快捷键（点右侧按键可重新录制）"))
-        var lastGroup = ""
-        for a in allHotkeyActions() {
-            if a.group != lastGroup {
-                let g = bodyLabel(a.group, size: 11)
-                g.textColor = .tertiaryLabelColor
-                stack.addArrangedSubview(g)
-                lastGroup = a.group
-            }
-            let name = bodyLabel(a.title)
-            name.widthAnchor.constraint(equalToConstant: 96).isActive = true
-            let key = NSButton(title: formatHotkey(hotkey(for: a.id)), target: self,
-                               action: #selector(recordHotkey(_:)))
-            key.bezelStyle = .rounded
-            key.identifier = NSUserInterfaceItemIdentifier(a.id)
-            key.widthAnchor.constraint(equalToConstant: 108).isActive = true
-            stack.addArrangedSubview(row([name, key]))
-        }
-        stack.addArrangedSubview(button("恢复默认快捷键", #selector(resetKeys)))
-
-        // 底部
-        let line = NSBox()
-        line.boxType = .separator
-        stack.addArrangedSubview(line)
-        stack.addArrangedSubview(row([
-            button("测试连接", #selector(doTest)),
-            button("搜索设备…", #selector(doDiscover)),
-            button("关闭", #selector(doClose)),
-        ]))
-
-        // 放到容器里，按 stack 的固有高度定尺寸
-        let container = NSView()
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 18),
-            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -18),
-            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 16),
-            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -16),
-        ])
-        container.frame = NSRect(x: 0, y: 0, width: 380, height: 100)
-        container.layoutSubtreeIfNeeded()
-        let h = stack.fittingSize.height + 32
-        container.frame = NSRect(x: 0, y: 0, width: 380, height: h)
-        return container
-    }
-
-    // ── 动作 ────────────────────────────────────────────────
-
-    @objc private func doSwitch(_ sender: NSButton) {
-        guard let key = sender.identifier?.rawValue else { return }
-        AppDelegate.shared.performSwitch(key)
-    }
-
-    @objc private func volUp()   { stepVolume(up: true);  refreshLiveInfo() }
-    @objc private func volDown() { stepVolume(up: false); refreshLiveInfo() }
-
-    @objc private func brightnessChanged(_ sender: NSSegmentedControl) {
-        gammaLevelIndex = sender.selectedSegment
-        applyGammaPreset()
-        AppDelegate.shared.buildMenu()
-    }
-
-    @objc private func tempChanged(_ sender: NSPopUpButton) {
-        gammaTempIndex = sender.indexOfSelectedItem
-        applyGammaPreset()
-        AppDelegate.shared.buildMenu()
-    }
-
-    @objc private func doTest() {
-        AppDelegate.shared.testConn()
-        refresh()
-    }
-
-    @objc private func doDiscover() {
-        hide()
-        AppDelegate.shared.discover(nil)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self] in self?.refresh() }
-    }
-
-    @objc private func doClose() { hide() }
-
-    @objc private func resetKeys() {
-        resetHotkeys()
-        AppDelegate.shared.reloadHotkeys()
-        AppDelegate.shared.buildMenu()
-        refresh()
-    }
-
-    @objc private func recordHotkey(_ sender: NSButton) {
-        guard let action = sender.identifier?.rawValue else { return }
-        let title = allHotkeyActions().first(where: { $0.id == action })?.title ?? action
-
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 340, height: 132),
-                         styleMask: [.titled], backing: .buffered, defer: false)
-        w.title = "设置快捷键"
-        w.level = .floating
-        w.isReleasedWhenClosed = false
-
-        let v = KeyCaptureView(frame: NSRect(x: 0, y: 0, width: 340, height: 132))
-        v.addHint(title)
-        v.onCapture = { spec in
-            w.orderOut(nil)
-            if let s = spec {
-                if s.keyCode == 0 && s.mods == 0 {
-                    setHotkey(nil, for: action)          // 清除
-                } else {
-                    setHotkey(s, for: action)
-                }
-            }
-            AppDelegate.shared.reloadHotkeys()
-            AppDelegate.shared.buildMenu()
-            self.refresh()
-            logLine("快捷键 \(action) -> \(formatHotkey(hotkey(for: action)))")
-        }
-        w.contentView = v
-        w.center()
-        w.makeKeyAndOrderFront(nil)
-        w.makeFirstResponder(v)
-        NSApp.activate(ignoringOtherApps: true)
     }
 }
 
