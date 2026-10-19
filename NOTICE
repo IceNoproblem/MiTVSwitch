@@ -1,0 +1,61 @@
+MiTVSwitch
+Copyright (C) 2026 IceNoproblem
+
+本项目采用 GPL-3.0（见 LICENSE）。其中部分协议用法与设计思路借鉴自下列
+以 MIT 许可发布的项目，按 MIT 要求在此保留其版权声明。
+
+────────────────────────────────────────────────────────────────────────
+
+MonitorBar
+https://github.com/Binaryify/MonitorBar
+Copyright (c) 2026 binaryify
+Licensed under the MIT License (全文见本文件末尾)
+
+本项目借用了以下具体成果：
+
+1. 6095 端口接口的补充用法
+   - GET /request?action=isalive           设备名、平台、固件版本
+   - GET /controller?action=getsources     真实输入列表（sourceId + sourceName）
+   - GET /controller?action=changesource2&sourceid=<编号>
+     按编号切源，能切到 DP / USB-C；按名字的 changesource 会被拒
+
+2. 输入编号约定
+   23 = HDMI1，24 = HDMI2，29 = DP，30 = USB-C。
+   编号沿用 MStar 电视输入表，老固件会把 29 报成 DVI，
+   因此按编号纠正名字。
+
+3. 双模显示器（如 REDMI G Pro 27U）4K 160Hz ↔ 1080p 320Hz 的切换方式
+   没有对应接口，只能走遥控按键宏：
+   menu → right × 5 → enter → right（开）/ left（关）→ back × 2
+
+4. 软件调光与色温的做法
+   改写显卡 Gamma 查色表（macOS CGSetDisplayTransferByTable /
+   Windows SetDeviceGammaRamp），色温用开尔文近似的 RGB 增益并归一化，
+   以及 100/85/70/55% 的亮度档位设计。
+
+以上成果在 MiTVSwitch 中均以 Swift 与 C# 重新实现，未直接复制其 Go 源码。
+协议事实（接口名、参数、编号含义、按键序列）本身不受版权保护，
+但保留此声明既是对原作者的致谢，也便于溯源。
+
+────────────────────────────────────────────────────────────────────────
+MIT License
+
+Copyright (c) 2026 binaryify
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

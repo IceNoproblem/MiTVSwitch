@@ -58,6 +58,41 @@ namespace MiTVSwitch
             }
         }
 
+        private static int ReadInt(string name)
+        {
+            try
+            {
+                string p = Path.Combine(DataDir, name + ".txt");
+                if (File.Exists(p) && int.TryParse(File.ReadAllText(p).Trim(), out int v)) return v;
+            }
+            catch { }
+            return 0;
+        }
+
+        private static void WriteInt(string name, int v)
+        {
+            try
+            {
+                Directory.CreateDirectory(DataDir);
+                File.WriteAllText(Path.Combine(DataDir, name + ".txt"), v.ToString());
+            }
+            catch { }
+        }
+
+        /// <summary>软件调光的亮度档位下标</summary>
+        public static int GammaLevel
+        {
+            get => ReadInt("gamma-level");
+            set => WriteInt("gamma-level", value);
+        }
+
+        /// <summary>色温档位下标</summary>
+        public static int GammaTemp
+        {
+            get => ReadInt("gamma-temp");
+            set => WriteInt("gamma-temp", value);
+        }
+
         /// <summary>开机自启：写 HKCU 的 Run 键，不需要管理员权限</summary>
         public static bool StartWithWindows
         {

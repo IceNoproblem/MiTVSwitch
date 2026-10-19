@@ -39,6 +39,17 @@ namespace MiTVSwitch
         private const uint MOD_SHIFT = 0x0004;
         private const uint MOD_NOREPEAT = 0x4000;
 
+        /// <summary>非切源类热键的 id 从这里起，避免和 Sources 的下标撞车</summary>
+        private const int ExtraHotkeyBase = 100;
+
+        private static readonly (Keys Hotkey, string Label)[] ExtraKeys =
+        {
+            (Keys.Control | Keys.Alt | Keys.Up,                 "亮度 +"),
+            (Keys.Control | Keys.Alt | Keys.Down,               "亮度 −"),
+            (Keys.Control | Keys.Alt | Keys.Shift | Keys.Up,    "音量 +"),
+            (Keys.Control | Keys.Alt | Keys.Shift | Keys.Down,  "音量 −"),
+        };
+
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
 
@@ -48,11 +59,15 @@ namespace MiTVSwitch
         private readonly NotifyIcon _tray;
         private readonly HotkeyWindow _hidden;
         private readonly List<int> _hotkeyIds = new();
+        private List<DeviceSource> _sources = new();
         private ToolStripMenuItem? _header;
         private bool _busy;
 
         public TrayApp()
         {
+            // 先把原始 Gamma 曲线存下来，之后的调光都基于它算
+            Gamma.SaveOriginal();
+
             _hidden = new HotkeyWindow();
             _hidden.HotkeyPressed += OnHotkeyPressed;
             _hidden.PowerChanged += OnPowerChanged;
@@ -68,6 +83,9 @@ namespace MiTVSwitch
                 _tray.ContextMenuStrip?.Show(Cursor.Position);
 
             RegisterAllHotkeys();
+
+            // 恢复上次的调光 / 色温
+            if (Settings.GammaLevel != 0 || Settings.GammaTemp != 0) ApplyPicture();
 
             if (string.IsNullOrWhiteSpace(Settings.Host))
                 PromptForHost();
@@ -108,12 +126,72 @@ namespace MiTVSwitch
             for (int i = 0; i < Sources.Length; i++)
             {
                 Source s = Sources[i];
-                var item = new ToolStripMenuItem("  " + s.Title) { Tag = s };
+                string title = "  " + s.Title;
+                // 设备报了输入列表时，标出它没有的口，免得点了白点
+                if (_sources.Count > 0 && TvClient.ResolveSourceId(_sources, s.Key) is null)
+                    title += "   （设备无此输入）";
+
+                var item = new ToolStripMenuItem(title) { Tag = s };
                 if (s.Hotkey != Keys.None)
                     item.ShortcutKeyDisplayString = FormatHotkey(s.Hotkey);
                 item.Click += (_, _) => _ = SwitchAsync(s.Key);
                 menu.Items.Add(item);
             }
+
+            menu.Items.Add(new ToolStripSeparator());
+
+            // 音量：走局域网遥控按键，不依赖 DDC
+            var volume = new ToolStripMenuItem("音量");
+            var volUp = new ToolStripMenuItem("音量 +") { ShortcutKeyDisplayString = "Ctrl+Alt+Shift+↑" };
+            volUp.Click += (_, _) => _ = VolumeAsync(true);
+            var volDown = new ToolStripMenuItem("音量 −") { ShortcutKeyDisplayString = "Ctrl+Alt+Shift+↓" };
+            volDown.Click += (_, _) => _ = VolumeAsync(false);
+            var volShow = new ToolStripMenuItem("查看当前音量");
+            volShow.Click += async (_, _) => await ShowVolumeAsync();
+            volume.DropDownItems.Add(volUp);
+            volume.DropDownItems.Add(volDown);
+            volume.DropDownItems.Add(new ToolStripSeparator());
+            volume.DropDownItems.Add(volShow);
+            menu.Items.Add(volume);
+
+            // 画面：软件调光 + 色温（改显卡 Gamma 表，任何显示器都能用）
+            var picture = new ToolStripMenuItem("画面（软件调光 / 色温）");
+            for (int i = 0; i < Gamma.BrightnessNames.Length; i++)
+            {
+                int idx = i;
+                var it = new ToolStripMenuItem($"亮度 {Gamma.BrightnessNames[i]}")
+                {
+                    Checked = Settings.GammaLevel == i,
+                };
+                it.Click += (_, _) => { Settings.GammaLevel = idx; ApplyPicture(); RebuildMenu(); };
+                picture.DropDownItems.Add(it);
+            }
+            picture.DropDownItems.Add(new ToolStripSeparator());
+            for (int i = 0; i < Gamma.TempNames.Length; i++)
+            {
+                int idx = i;
+                var it = new ToolStripMenuItem(Gamma.TempNames[i])
+                {
+                    Checked = Settings.GammaTemp == i,
+                };
+                it.Click += (_, _) => { Settings.GammaTemp = idx; ApplyPicture(); RebuildMenu(); };
+                picture.DropDownItems.Add(it);
+            }
+            picture.DropDownItems.Add(new ToolStripSeparator());
+            var resetPic = new ToolStripMenuItem("恢复原始画面");
+            resetPic.Click += (_, _) =>
+            {
+                Settings.GammaLevel = 0;
+                Settings.GammaTemp = 0;
+                Gamma.Restore();
+                RebuildMenu();
+            };
+            picture.DropDownItems.Add(resetPic);
+            menu.Items.Add(picture);
+
+            var comp = new ToolStripMenuItem("切换 320Hz 竞技模式");
+            comp.Click += async (_, _) => await CompetitiveAsync();
+            menu.Items.Add(comp);
 
             menu.Items.Add(new ToolStripSeparator());
 
@@ -153,6 +231,68 @@ namespace MiTVSwitch
             var item = new ToolStripMenuItem(text);
             item.Click += onClick;
             return item;
+        }
+
+        /// <summary>菜单里的勾选状态变了，重建一次</summary>
+        private void RebuildMenu()
+        {
+            _tray.ContextMenuStrip?.Dispose();
+            _tray.ContextMenuStrip = BuildMenu();
+        }
+
+        // ── 画面 / 音量 / 竞技模式 ──────────────────────────────
+
+        private static void ApplyPicture()
+        {
+            int lv = Math.Clamp(Settings.GammaLevel, 0, Gamma.BrightnessSteps.Length - 1);
+            int tp = Math.Clamp(Settings.GammaTemp, 0, Gamma.TempValues.Length - 1);
+            bool ok = Gamma.Apply(Gamma.BrightnessSteps[lv], Gamma.TempValues[tp]);
+            Log($"画面：亮度 {Gamma.BrightnessNames[lv]}，色温 {Gamma.TempNames[tp]} -> {(ok ? "OK" : "显卡不接受")}");
+        }
+
+        private void StepBrightness(int delta)
+        {
+            int next = Math.Clamp(Settings.GammaLevel + delta, 0, Gamma.BrightnessSteps.Length - 1);
+            if (next == Settings.GammaLevel) return;
+            Settings.GammaLevel = next;
+            ApplyPicture();
+            RebuildMenu();
+        }
+
+        private async Task VolumeAsync(bool up)
+        {
+            if (string.IsNullOrWhiteSpace(Settings.Host)) { PromptForHost(); return; }
+            await TvClient.StepVolumeAsync(Settings.Host, up);
+            Log($"音量 {(up ? "+" : "-")}2");
+        }
+
+        private async Task ShowVolumeAsync()
+        {
+            if (string.IsNullOrWhiteSpace(Settings.Host)) { PromptForHost(); return; }
+            var v = await TvClient.GetVolumeAsync(Settings.Host);
+            MessageBox.Show(
+                v is (int value, int max) ? $"{value} / {max}" : "设备没有返回音量，可能不支持音量接口。",
+                "当前音量", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private async Task CompetitiveAsync()
+        {
+            if (string.IsNullOrWhiteSpace(Settings.Host)) { PromptForHost(); return; }
+
+            DialogResult pick = MessageBox.Show(
+                "适用于 G Pro 27U 这类双模显示器：在 4K 160Hz 与 1080p 320Hz 之间切换。\n\n" +
+                "切换后显示器会换 EDID，屏幕黑一下再回来，系统需要几秒重新识别。\n\n" +
+                "点「是」切到 320Hz，点「否」切回 4K 160Hz。",
+                "切换 320Hz 竞技模式",
+                MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+
+            if (pick == DialogResult.Cancel) return;
+
+            await Task.Run(async () =>
+            {
+                await TvClient.SetCompetitiveAsync(Settings.Host, pick == DialogResult.Yes);
+                Log($"竞技模式 320Hz -> {(pick == DialogResult.Yes ? "开" : "关")}");
+            });
         }
 
         private void UpdateHeader()
@@ -218,6 +358,25 @@ namespace MiTVSwitch
                     Log($"热键注册失败 {FormatHotkey(s.Hotkey)} err={Marshal.GetLastWin32Error()}");
                 }
             }
+
+            for (int i = 0; i < ExtraKeys.Length; i++)
+            {
+                Keys k = ExtraKeys[i].Hotkey;
+                uint mods = MOD_NOREPEAT;
+                if ((k & Keys.Control) != 0) mods |= MOD_CONTROL;
+                if ((k & Keys.Alt) != 0) mods |= MOD_ALT;
+                if ((k & Keys.Shift) != 0) mods |= MOD_SHIFT;
+
+                int id = ExtraHotkeyBase + i;
+                if (RegisterHotKey(_hidden.Handle, id, mods, (uint)(k & Keys.KeyCode)))
+                {
+                    _hotkeyIds.Add(id);
+                }
+                else
+                {
+                    Log($"热键注册失败 {ExtraKeys[i].Label} ({FormatHotkey(k)}) err={Marshal.GetLastWin32Error()}");
+                }
+            }
         }
 
         private void UnregisterAllHotkeys()
@@ -229,6 +388,18 @@ namespace MiTVSwitch
 
         private void OnHotkeyPressed(int id)
         {
+            if (id >= ExtraHotkeyBase)
+            {
+                switch (id - ExtraHotkeyBase)
+                {
+                    case 0: StepBrightness(-1); break;
+                    case 1: StepBrightness(+1); break;
+                    case 2: _ = VolumeAsync(true); break;
+                    case 3: _ = VolumeAsync(false); break;
+                }
+                return;
+            }
+
             int idx = id - 1;
             if (idx < 0 || idx >= Sources.Length) return;
             _ = SwitchAsync(Sources[idx].Key);
@@ -265,13 +436,20 @@ namespace MiTVSwitch
             _busy = true;
             try
             {
-                TvResult r = await TvClient.SwitchAsync(host, key);
-                Log($"changesource {key} -> {r} {Truncate(r.Body, 160)}");
+                if (_sources.Count == 0)
+                    _sources = await TvClient.GetSourcesAsync(host);
+
+                TvResult r = await TvClient.SwitchAsync(host, key, _sources);
+                Log($"切源 {key} -> {r} {Truncate(r.Body, 160)}");
+
                 if (!r.Ok)
                 {
+                    string available = string.Join("、", _sources.ConvertAll(s => s.Name));
                     MessageBox.Show(
-                        $"设备无响应，或该源名不被接受（{key}）。\n\n{r}\n\n" +
-                        "可以在菜单里用「测试连接」确认地址是否正确。",
+                        available.Length == 0
+                            ? $"显示器无响应。\n\n{r}\n\n可以在菜单里用「测试连接」确认地址是否正确。"
+                            : $"设备没有提供「{key}」这个输入。\n\n当前可用：{available}\n\n" +
+                              "如果刚改过接线，先用「测试连接」刷新一次列表。",
                         "切换失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
             }
@@ -284,7 +462,10 @@ namespace MiTVSwitch
         private async Task SelfCheckAsync()
         {
             TvResult r = await TvClient.InfoAsync(Settings.Host);
-            Log($"启动自检 {Settings.Host} -> {r}");
+            _sources = await TvClient.GetSourcesAsync(Settings.Host);
+            string list = string.Join(" ", _sources.ConvertAll(s => $"{s.Name}={s.Id}"));
+            Log($"启动自检 {Settings.Host} -> {r} 信号源[{list}]");
+            if (_sources.Count > 0) RebuildMenu();
         }
 
         private void PromptForHost()
@@ -324,7 +505,7 @@ namespace MiTVSwitch
             int idx = Prompt.AskList(
                 "发现设备",
                 $"找到 {list.Count} 台，选择要控制的一台：",
-                list.ConvertAll(d => $"{d.Name}    ({d.Ip})"));
+                list.ConvertAll(d => $"{d.Name}{(d.IsMonitor ? "（显示器）" : "")}    ({d.Ip})"));
 
             if (idx < 0 || idx >= list.Count) return;
 
@@ -341,21 +522,59 @@ namespace MiTVSwitch
                 return;
             }
 
-            TvResult r = await TvClient.InfoAsync(Settings.Host);
-            if (r.Ok)
+            string host = Settings.Host;
+            TvResult alive = await TvClient.AliveAsync(host);
+            TvResult info = await TvClient.InfoAsync(host);
+            var sources = await TvClient.GetSourcesAsync(host);
+            if (sources.Count > 0)
             {
-                MessageBox.Show($"地址：{Settings.Host}\n\n{r.Body}",
-                    "连接正常", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                _sources = sources;
+                RebuildMenu();
+            }
+
+            var lines = new List<string> { $"地址：{host}" };
+            string? name = ExtractDeviceName(alive.Body) ?? ExtractDeviceName(info.Body);
+            if (!string.IsNullOrEmpty(name)) lines.Add($"设备：{name}");
+
+            if (sources.Count == 0)
+            {
+                lines.Add("信号源：设备没提供列表（会退回按名字切换）");
             }
             else
             {
-                MessageBox.Show($"地址：{Settings.Host}\n\n{r}\n\n{r.Body}",
-                    "连接失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                lines.Add("信号源：" + string.Join("  ", sources.ConvertAll(s => $"{s.Name}={s.Id}")));
+                lines.Add("切换方式：changesource2（按编号，DP / USB-C 可用）");
             }
+
+            lines.Add("判定：" + (TvClient.LooksLikeMonitor(name ?? "", sources)
+                ? "显示器" : "电视或其他设备"));
+
+            if (!alive.Ok && !info.Ok)
+                lines.Add($"HTTP：isalive {alive} / getsysteminfo {info}");
+
+            MessageBox.Show(
+                string.Join("\n", lines),
+                alive.Ok || info.Ok ? "连接正常" : "连接失败",
+                MessageBoxButtons.OK,
+                alive.Ok || info.Ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+        }
+
+        private static string? ExtractDeviceName(string body)
+        {
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(body);
+                if (doc.RootElement.TryGetProperty("data", out var d) &&
+                    d.TryGetProperty("devicename", out var n))
+                    return n.GetString();
+            }
+            catch { }
+            return null;
         }
 
         private void ExitApp()
         {
+            Gamma.Restore();
             UnregisterAllHotkeys();
             _tray.Visible = false;
             _tray.Dispose();

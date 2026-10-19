@@ -12,9 +12,16 @@
 #   mitsw dp             切到 DisplayPort
 #   mitsw usbc           切到 USB-C
 #   mitsw raw <源名>      直接发送自定义源名
-#   mitsw status         查看设备信息
+#   mitsw sources        列出设备报告的输入及编号
+#   mitsw id <源名>       查某个源名在设备上的编号
+#   mitsw status         查看设备信息（isalive + 信号源 + 系统信息）
 #   mitsw vol            查看音量
+#   mitsw vol+ / vol-    音量加 / 减
+#   mitsw comp on|off    切换 320Hz 竞技模式（双模显示器）
 #   mitsw keys           列出常用按键
+#
+# 切源优先走 changesource2（按编号），它能切到 DP / USB-C；
+# 设备不支持时自动退回按名字的 changesource。
 
 CONF="${HOME}/.config/mitvswitch/host"
 PORT=6095
@@ -28,34 +35,124 @@ if [[ -z "$IP" ]]; then
   exit 1
 fi
 
-BASE="http://${IP}:${PORT}/controller?action="
+# --noproxy '*' 很关键：macOS 系统代理的例外列表不认 CIDR 网段，
+# 不加这一项，发往局域网设备的请求会被塞进代理然后失败。
+get() { curl -s --noproxy '*' -m 5 "http://${IP}:${PORT}$1"; }
 
-send() {
-  local resp
-  # --noproxy '*' 很关键：macOS 系统代理的例外列表不认 CIDR 网段，
-  # 不加这一项，发往局域网设备的请求会被塞进代理然后失败。
-  resp=$(curl -s --noproxy '*' -m 5 "${BASE}$1")
-  if [[ "$resp" == *'"success"'* ]]; then
-    print "✅ $2"
+ok() { [[ "$1" == *'"success"'* ]] }
+
+# 从 getsources 里找出某个源名对应的编号；找不到就输出空
+# 用 awk 把 "sourceId" 当记录分隔符，避免逗号拆分导致字段错位
+source_id() {
+  local want="${1:u}"
+  get "/controller?action=getsources" | awk -v want="$want" '
+    BEGIN { RS = "\"sourceId\"" }
+    NR > 1 {
+      id = $0; sub(/^:/, "", id); sub(/[^0-9].*/, "", id)
+      src = $0; sub(/.*"sourceName":"/, "", src); sub(/".*/, "", src)
+      n = toupper(src); gsub(/[^A-Z0-9]/, "", n)
+      if (want == "DP"   && id == 29) { print id; exit }
+      if (want == "USBC" && id == 30) { print id; exit }
+      if (n == want) { print id; exit }
+      if (index(n, want) == 1) { print id; exit }
+    }'
+}
+
+switch_to() {
+  local key="$1" label="$2" id resp
+  id=$(source_id "$key")
+  if [[ -n "$id" ]]; then
+    resp=$(get "/controller?action=changesource2&sourceid=${id}")
+    if ok "$resp"; then
+      print "✅ $label（按编号 $id）"
+      return 0
+    fi
+  fi
+  resp=$(get "/controller?action=changesource&source=$key")
+  if ok "$resp"; then
+    print "✅ $label（按名字）"
     return 0
   fi
-  print "❌ $2 失败：${resp:-（无响应）}"
+  print "❌ $label 失败：${resp:-（无响应）}"
   return 1
 }
 
 case "$1" in
-  hdmi1|1)    send "changesource&source=HDMI1" "已切到 HDMI 1" ;;
-  hdmi2|2)    send "changesource&source=HDMI2" "已切到 HDMI 2" ;;
-  hdmi3|3)    send "changesource&source=HDMI3" "已切到 HDMI 3" ;;
-  dp|dp1)     send "changesource&source=DP"    "已切到 DisplayPort" ;;
-  usbc|typec) send "changesource&source=USBC"  "已切到 USB-C" ;;
-  raw)        send "changesource&source=$2"    "已发送源名 $2" ;;
-  status|s)   curl -s --noproxy '*' -m 5 "${BASE}getsysteminfo"; print ;;
-  vol)        curl -s --noproxy '*' -m 5 "${BASE}getvolume"; print ;;
+  hdmi1|1)    switch_to HDMI1 "已切到 HDMI 1" ;;
+  hdmi2|2)    switch_to HDMI2 "已切到 HDMI 2" ;;
+  hdmi3|3)    switch_to HDMI3 "已切到 HDMI 3" ;;
+  dp|dp1)     switch_to DP    "已切到 DisplayPort" ;;
+  usbc|typec) switch_to USBC  "已切到 USB-C" ;;
+
+  raw)
+    if [[ -z "$2" ]]; then print "用法: mitsw raw <源名>"; exit 1; fi
+    switch_to "$2" "已切到 $2" ;;
+
+  sources|src)
+    resp=$(get "/controller?action=getsources")
+    if ! ok "$resp"; then print "❌ 取信号源失败：${resp:-（无响应）}"; exit 1; fi
+    print "信号源列表："
+    print "$resp" | awk '
+      BEGIN { RS = "\"sourceId\"" }
+      NR > 1 {
+        id = $0; sub(/^:/, "", id); sub(/[^0-9].*/, "", id)
+        src = $0; sub(/.*"sourceName":"/, "", src); sub(/".*/, "", src)
+        printf "  %-8s 编号 %s\n", src, id
+      }' ;;
+
+  id)
+    if [[ -z "$2" ]]; then print "用法: mitsw id <源名>（如 dp / hdmi1 / usbc）"; exit 1; fi
+    resolved=$(source_id "${2:u}")
+    if [[ -n "$resolved" ]]; then
+      print "${2:u} → 编号 $resolved"
+    else
+      print "${2:u} → 设备没有这个输入"
+      exit 1
+    fi ;;
+
+  status|s)
+    print "── isalive ──"
+    get "/request?action=isalive"; print
+    print "── 信号源 ──"
+    get "/controller?action=getsources"; print
+    print "── 设备信息 ──"
+    get "/controller?action=getsysteminfo"; print ;;
+
+  vol)    get "/controller?action=getvolume"; print ;;
+  vol+|vup)
+    for i in 1 2; do get "/controller?action=keyevent&keycode=volumeup" >/dev/null; sleep 0.06; done
+    print "✅ 音量 +" ;;
+  vol-|vdn)
+    for i in 1 2; do get "/controller?action=keyevent&keycode=volumedown" >/dev/null; sleep 0.06; done
+    print "✅ 音量 −" ;;
+
+  comp)
+    if [[ "$2" != "on" && "$2" != "off" ]]; then
+      print "用法: mitsw comp on|off"; exit 1
+    fi
+    # 没有对应接口，只能走按键宏：
+    # menu 打开游戏栏 → 右移 5 次到模式项 → enter 进入 → right 开 / left 关
+    print "切换中，显示器会黑一下并换 EDID…"
+    get "/controller?action=keyevent&keycode=menu" >/dev/null; sleep 0.7
+    for i in 1 2 3 4 5; do
+      get "/controller?action=keyevent&keycode=right" >/dev/null; sleep 0.1
+    done
+    get "/controller?action=keyevent&keycode=enter" >/dev/null; sleep 0.3
+    if [[ "$2" == "on" ]]; then
+      get "/controller?action=keyevent&keycode=right" >/dev/null
+      print "✅ 竞技模式 320Hz 已开启"
+    else
+      get "/controller?action=keyevent&keycode=left" >/dev/null
+      print "✅ 竞技模式 320Hz 已关闭"
+    fi
+    get "/controller?action=keyevent&keycode=back" >/dev/null
+    get "/controller?action=keyevent&keycode=back" >/dev/null ;;
+
   keys)
     print "按键（keyevent）：power up down left right enter home back menu volumeup volumedown"
-    print "示例：curl -s --noproxy '*' \"${BASE}keyevent&keycode=home\"" ;;
+    print "示例：curl -s --noproxy '*' \"http://${IP}:${PORT}/controller?action=keyevent&keycode=home\"" ;;
+
   *)
-    print "用法: mitsw {hdmi1|hdmi2|hdmi3|dp|usbc|raw <源名>|status|vol|keys}"
+    print "用法: mitsw {hdmi1|hdmi2|hdmi3|dp|usbc|raw <源名>|sources|id <源名>|status|vol|vol+|vol-|comp on|off|keys}"
     exit 1 ;;
 esac
