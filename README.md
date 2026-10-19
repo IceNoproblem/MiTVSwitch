@@ -159,6 +159,7 @@ build.bat
 
 | 菜单项 | 说明 |
 |---|---|
+| **打开控制面板…** | 图形面板：信号源、音量、画面、快捷键集中在一处 |
 | HDMI 1 / HDMI 2 | 切信号源，带快捷键提示 |
 | DisplayPort / USB-C | 其他接口；设备没这个口时会标注「设备无此输入」 |
 | **音量 ▸** | 音量 + / 音量 − / 查看当前音量（走局域网遥控，不依赖 DDC） |
@@ -174,16 +175,46 @@ build.bat
 
 macOS 点菜单栏的 `▭▭` 图标；Windows 右键托盘图标。
 
-### 全局快捷键
+### 控制面板
 
-| 功能 | macOS | Windows |
+菜单里点「**打开控制面板…**」打开，所有常用操作集中在一处：
+
+- **信号源**：按设备实际提供的接口列出按钮，没有的口会置灰并标「（无）」
+- **显示器音量**：`−` / 当前值 / `+` / 刷新
+- **画面**：亮度四档下拉、色温下拉、恢复原始画面
+- **快捷键**：每个可绑定的动作一行，点右侧按键即可重新录制
+
+面板是原生控件（macOS AppKit / Windows WinForms），没有引入第三方 UI 框架。
+
+### 自定义快捷键
+
+默认值：
+
+| 动作 | macOS | Windows |
 |---|---|---|
-| 切到第 1 个源 | `⌃⌥1` | `Ctrl+Alt+1` |
-| 切到第 2 个源 | `⌃⌥2` | `Ctrl+Alt+2` |
+| 切到 HDMI 1 / HDMI 2 | `⌃⌥1` / `⌃⌥2` | `Ctrl+Alt+1` / `Ctrl+Alt+2` |
 | 亮度 + / − | `⌃⌥↑` / `⌃⌥↓` | `Ctrl+Alt+↑` / `Ctrl+Alt+↓` |
 | 音量 + / − | `⌃⌥⇧↑` / `⌃⌥⇧↓` | `Ctrl+Alt+Shift+↑` / `Ctrl+Alt+Shift+↓` |
 
+改法：控制面板 → 快捷键 → 点右侧的键 → 按下新的组合键。
+
+- 必须包含 `⌃` / `⌥` / `⇧` / `⌘`（Windows 是 Ctrl / Alt / Shift / Win）中至少一个，避免单个键被全局拦截
+- 录制时按 `Esc` 取消，按 `Delete` 清除这个动作的绑定
+- 「恢复默认快捷键」一键还原
+- 改完立即生效，不用重启
+
+存储位置：
+
+- macOS：`~/Library/Preferences/top.icenoproblem.mitvswitch.plist` 的 `hotkeyMap`
+- Windows：`%APPDATA%\MiTVSwitch\hotkeys.txt`
+
+> 如果新键和系统或其他软件的快捷键冲突，注册会失败并记进日志，此时换一个组合即可。
+
+### 全局快捷键
+
 macOS 用 Carbon `RegisterEventHotKey`，Windows 用 `RegisterHotKey`，**都不需要辅助功能权限**，也不会抢焦点。即使显示器当前显示的是游戏机画面、你看不到电脑桌面，在键盘上按下去照样生效。
+
+所有热键都可以在控制面板里改（见上一节「自定义快捷键」），改完立即重新注册，不用重启。
 
 ### 音量
 
@@ -209,8 +240,10 @@ macOS 用 Carbon `RegisterEventHotKey`，Windows 用 `RegisterHotKey`，**都不
 REDMI G Pro 27U 这类双模显示器在 4K 160Hz 与 1080p 320Hz 之间切换需要换 EDID，原本只能进显示器菜单操作。**没有对应接口**，所以这里走遥控按键宏：
 
 ```
-menu → right × 5 → enter → right（开）/ left（关）→ back × 2
+menu → right × 4 → enter → right（开）/ left（关）→ back × 2
 ```
+
+右移次数按实测确定为 4 次。不同机型的游戏栏菜单层级可能不同，遇到点不对就调 `menu` 后的右移次数。
 
 切换后显示器会黑一下再回来，系统需要几秒重新识别。菜单里点一次，选「切换到 320Hz」或「切回 4K 160Hz」。
 
@@ -401,13 +434,15 @@ DDC/CI 是显示器切源的标准做法，`m1ddc` / BetterDisplay 都走这条�
 ```
 MiTVSwitch/
 ├── macos/
-│   ├── main.swift        菜单栏 App（AppKit + Carbon 热键 + Gamma 调光）
+│   ├── main.swift        菜单栏 App + 控制面板（AppKit + Carbon 热键 + Gamma 调光）
 │   ├── Info.plist
 │   ├── build.sh          swiftc 一键编译打包
 │   └── mitsw             命令行工具
 ├── windows/
 │   ├── Program.cs        入口 + 单实例
 │   ├── TrayApp.cs        托盘图标、菜单、热键、动作
+│   ├── PanelForm.cs      控制面板 + 快捷键录制对话框
+│   ├── Hotkeys.cs        快捷键配置与持久化
 │   ├── HotkeyWindow.cs   WM_HOTKEY / WM_POWERBROADCAST 接收窗口
 │   ├── TvClient.cs       6095 接口调用 + 局域网发现 + 编号解析
 │   ├── Gamma.cs          软件调光 / 色温（SetDeviceGammaRamp）

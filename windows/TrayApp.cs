@@ -14,40 +14,24 @@ namespace MiTVSwitch
     {
         public string Key = "";
         public string Title = "";
-        public Keys Hotkey = Keys.None;
     }
 
     internal sealed class TrayApp : ApplicationContext
     {
         // ───────────────────────────────────────────────────────────
-        //  想改信号源名字、增减接口、换快捷键，改这张表就行。
-        //  Key   : 传给 changesource 的源名，大小写不敏感
-        //  Title : 菜单里显示的名字
+        //  想改信号源名字、增减接口，改这张表就行。
+        //  Key   : 源名，大小写不敏感；程序启动时用 getsources 解析成编号
+        //  Title : 界面里显示的名字
+        //  默认快捷键在 Hotkeys.Defaults() 里，用户可在控制面板里改。
         //  数组第 1、2 项同时是「睡眠切换」的目标：
         //  睡眠时切到第 1 项，唤醒后切回第 2 项。
         // ───────────────────────────────────────────────────────────
-        private static readonly Source[] Sources =
+        internal static readonly Source[] Sources =
         {
-            new Source { Key = "HDMI1", Title = "HDMI 1",      Hotkey = Keys.Control | Keys.Alt | Keys.D1 },
-            new Source { Key = "HDMI2", Title = "HDMI 2",      Hotkey = Keys.Control | Keys.Alt | Keys.D2 },
+            new Source { Key = "HDMI1", Title = "HDMI 1" },
+            new Source { Key = "HDMI2", Title = "HDMI 2" },
             new Source { Key = "DP",    Title = "DisplayPort" },
             new Source { Key = "USBC",  Title = "USB-C" },
-        };
-
-        private const uint MOD_ALT = 0x0001;
-        private const uint MOD_CONTROL = 0x0002;
-        private const uint MOD_SHIFT = 0x0004;
-        private const uint MOD_NOREPEAT = 0x4000;
-
-        /// <summary>非切源类热键的 id 从这里起，避免和 Sources 的下标撞车</summary>
-        private const int ExtraHotkeyBase = 100;
-
-        private static readonly (Keys Hotkey, string Label)[] ExtraKeys =
-        {
-            (Keys.Control | Keys.Alt | Keys.Up,                 "亮度 +"),
-            (Keys.Control | Keys.Alt | Keys.Down,               "亮度 −"),
-            (Keys.Control | Keys.Alt | Keys.Shift | Keys.Up,    "音量 +"),
-            (Keys.Control | Keys.Alt | Keys.Shift | Keys.Down,  "音量 −"),
         };
 
         [DllImport("user32.dll", SetLastError = true)]
@@ -59,9 +43,11 @@ namespace MiTVSwitch
         private readonly NotifyIcon _tray;
         private readonly HotkeyWindow _hidden;
         private readonly List<int> _hotkeyIds = new();
+        private readonly Dictionary<int, string> _idToAction = new();
         private List<DeviceSource> _sources = new();
         private ToolStripMenuItem? _header;
         private bool _busy;
+        private PanelForm? _panel;
 
         public TrayApp()
         {
@@ -116,6 +102,12 @@ namespace MiTVSwitch
         {
             var menu = new ContextMenuStrip();
 
+            var panelItem = new ToolStripMenuItem("打开控制面板…");
+            panelItem.Font = new Font(panelItem.Font, FontStyle.Bold);
+            panelItem.Click += (_, _) => ShowPanel();
+            menu.Items.Add(panelItem);
+            menu.Items.Add(new ToolStripSeparator());
+
             _header = new ToolStripMenuItem("MiTVSwitch")
             {
                 Enabled = false,
@@ -132,8 +124,8 @@ namespace MiTVSwitch
                     title += "   （设备无此输入）";
 
                 var item = new ToolStripMenuItem(title) { Tag = s };
-                if (s.Hotkey != Keys.None)
-                    item.ShortcutKeyDisplayString = FormatHotkey(s.Hotkey);
+                KeyBinding? hk = Hotkeys.Get($"src.{s.Key}");
+                if (hk is not null) item.ShortcutKeyDisplayString = hk.Display();
                 item.Click += (_, _) => _ = SwitchAsync(s.Key);
                 menu.Items.Add(item);
             }
@@ -142,9 +134,15 @@ namespace MiTVSwitch
 
             // 音量：走局域网遥控按键，不依赖 DDC
             var volume = new ToolStripMenuItem("音量");
-            var volUp = new ToolStripMenuItem("音量 +") { ShortcutKeyDisplayString = "Ctrl+Alt+Shift+↑" };
+            var volUp = new ToolStripMenuItem("音量 +")
+            {
+                ShortcutKeyDisplayString = Hotkeys.Get("vol.up")?.Display(),
+            };
             volUp.Click += (_, _) => _ = VolumeAsync(true);
-            var volDown = new ToolStripMenuItem("音量 −") { ShortcutKeyDisplayString = "Ctrl+Alt+Shift+↓" };
+            var volDown = new ToolStripMenuItem("音量 −")
+            {
+                ShortcutKeyDisplayString = Hotkeys.Get("vol.down")?.Display(),
+            };
             volDown.Click += (_, _) => _ = VolumeAsync(false);
             var volShow = new ToolStripMenuItem("查看当前音量");
             volShow.Click += async (_, _) => await ShowVolumeAsync();
@@ -242,12 +240,19 @@ namespace MiTVSwitch
 
         // ── 画面 / 音量 / 竞技模式 ──────────────────────────────
 
-        private static void ApplyPicture()
+        internal static void ApplyPicture()
         {
             int lv = Math.Clamp(Settings.GammaLevel, 0, Gamma.BrightnessSteps.Length - 1);
             int tp = Math.Clamp(Settings.GammaTemp, 0, Gamma.TempValues.Length - 1);
             bool ok = Gamma.Apply(Gamma.BrightnessSteps[lv], Gamma.TempValues[tp]);
             Log($"画面：亮度 {Gamma.BrightnessNames[lv]}，色温 {Gamma.TempNames[tp]} -> {(ok ? "OK" : "显卡不接受")}");
+        }
+
+        /// <summary>面板里改了画面参数后调用</summary>
+        internal void PictureChanged()
+        {
+            ApplyPicture();
+            RebuildMenu();
         }
 
         private void StepBrightness(int delta)
@@ -334,75 +339,91 @@ namespace MiTVSwitch
 
         // ── 热键 ────────────────────────────────────────────────
 
-        private void RegisterAllHotkeys()
+        internal void RegisterAllHotkeys()
         {
-            for (int i = 0; i < Sources.Length; i++)
+            UnregisterAllHotkeys();
+
+            int id = 1;
+            foreach (var (action, title, _) in Hotkeys.Actions())
             {
-                Source s = Sources[i];
-                if (s.Hotkey == Keys.None) continue;
+                KeyBinding? hk = Hotkeys.Get(action);
+                if (hk is null || hk.IsEmpty) continue;
 
-                uint mods = MOD_NOREPEAT;
-                if ((s.Hotkey & Keys.Control) != 0) mods |= MOD_CONTROL;
-                if ((s.Hotkey & Keys.Alt) != 0) mods |= MOD_ALT;
-                if ((s.Hotkey & Keys.Shift) != 0) mods |= MOD_SHIFT;
-
-                uint vk = (uint)(s.Hotkey & Keys.KeyCode);
-                int id = i + 1;
-
-                if (RegisterHotKey(_hidden.Handle, id, mods, vk))
+                uint mods = hk.ToRegisterMods() | KeyBinding.MOD_NOREPEAT;
+                if (RegisterHotKey(_hidden.Handle, id, mods, (uint)hk.Key))
                 {
                     _hotkeyIds.Add(id);
+                    _idToAction[id] = action;
+                    id++;
                 }
                 else
                 {
-                    Log($"热键注册失败 {FormatHotkey(s.Hotkey)} err={Marshal.GetLastWin32Error()}");
+                    Log($"热键注册失败 {title} ({hk.Display()}) err={Marshal.GetLastWin32Error()}");
                 }
             }
-
-            for (int i = 0; i < ExtraKeys.Length; i++)
-            {
-                Keys k = ExtraKeys[i].Hotkey;
-                uint mods = MOD_NOREPEAT;
-                if ((k & Keys.Control) != 0) mods |= MOD_CONTROL;
-                if ((k & Keys.Alt) != 0) mods |= MOD_ALT;
-                if ((k & Keys.Shift) != 0) mods |= MOD_SHIFT;
-
-                int id = ExtraHotkeyBase + i;
-                if (RegisterHotKey(_hidden.Handle, id, mods, (uint)(k & Keys.KeyCode)))
-                {
-                    _hotkeyIds.Add(id);
-                }
-                else
-                {
-                    Log($"热键注册失败 {ExtraKeys[i].Label} ({FormatHotkey(k)}) err={Marshal.GetLastWin32Error()}");
-                }
-            }
+            Log($"热键已注册 {_hotkeyIds.Count} 个");
         }
 
-        private void UnregisterAllHotkeys()
+        internal void UnregisterAllHotkeys()
         {
             foreach (int id in _hotkeyIds)
                 UnregisterHotKey(_hidden.Handle, id);
             _hotkeyIds.Clear();
+            _idToAction.Clear();
+        }
+
+        /// <summary>改完快捷键后重注册并刷新界面</summary>
+        internal void ReloadHotkeys()
+        {
+            RegisterAllHotkeys();
+            RebuildMenu();
         }
 
         private void OnHotkeyPressed(int id)
         {
-            if (id >= ExtraHotkeyBase)
+            if (!_idToAction.TryGetValue(id, out string? action)) return;
+            RunAction(action);
+        }
+
+        internal void RunAction(string action)
+        {
+            if (action.StartsWith("src."))
             {
-                switch (id - ExtraHotkeyBase)
-                {
-                    case 0: StepBrightness(-1); break;
-                    case 1: StepBrightness(+1); break;
-                    case 2: _ = VolumeAsync(true); break;
-                    case 3: _ = VolumeAsync(false); break;
-                }
+                _ = SwitchAsync(action[4..]);
                 return;
             }
 
-            int idx = id - 1;
-            if (idx < 0 || idx >= Sources.Length) return;
-            _ = SwitchAsync(Sources[idx].Key);
+            switch (action)
+            {
+                case "vol.up": _ = VolumeAsync(true); break;
+                case "vol.down": _ = VolumeAsync(false); break;
+                case "bright.up": StepBrightness(-1); break;
+                case "bright.down": StepBrightness(+1); break;
+            }
+        }
+
+        internal void ShowPanel()
+        {
+            if (_panel is null || _panel.IsDisposed)
+                _panel = new PanelForm(this);
+
+            _panel.Rebuild();
+            _panel.Show();
+            _panel.WindowState = FormWindowState.Normal;
+            _panel.Activate();
+        }
+
+        internal List<DeviceSource> CurrentSources => _sources;
+
+        internal void TestConnectionAndReport() => _ = TestAsync();
+
+        internal void RefreshSourcesAsync()
+        {
+            if (string.IsNullOrWhiteSpace(Settings.Host)) return;
+            _ = Task.Run(async () =>
+            {
+                _sources = await TvClient.GetSourcesAsync(Settings.Host);
+            });
         }
 
         private void OnPowerChanged(bool resumed)

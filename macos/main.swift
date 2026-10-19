@@ -19,24 +19,164 @@ let kAutoSleepKey = "autoOnSleep"
 
 // MARK: - 信号源表
 //
-// key   : 传给 changesource 的源名，大小写不敏感
-// title : 菜单里显示的名字
-// 热键  : 0 表示不绑定。默认给前两个绑 ⌃⌥1 / ⌃⌥2。
+// key   : 源名，大小写不敏感；程序启动时用 getsources 解析成设备上的编号
+// title : 界面里显示的名字
+// hotkey: 默认快捷键，用户可在控制面板里改
 //         按自己的设备改这里的顺序和名字即可。
+
+struct HotkeySpec {
+    let keyCode: UInt32
+    let mods: UInt32      // Carbon 修饰键：controlKey / optionKey / shiftKey / cmdKey
+}
 
 struct TVSource {
     let key: String
     let title: String
-    let hotKeyCode: UInt32
-    let hotMods: UInt32
+    let hotkey: HotkeySpec?
 }
 
 let allSources: [TVSource] = [
-    TVSource(key: "HDMI1", title: "HDMI 1",     hotKeyCode: UInt32(kVK_ANSI_1), hotMods: UInt32(controlKey | optionKey)),
-    TVSource(key: "HDMI2", title: "HDMI 2",     hotKeyCode: UInt32(kVK_ANSI_2), hotMods: UInt32(controlKey | optionKey)),
-    TVSource(key: "DP",    title: "DisplayPort", hotKeyCode: 0, hotMods: 0),
-    TVSource(key: "USBC",  title: "USB-C",       hotKeyCode: 0, hotMods: 0),
+    TVSource(key: "HDMI1", title: "HDMI 1",      hotkey: HotkeySpec(keyCode: UInt32(kVK_ANSI_1), mods: UInt32(controlKey | optionKey))),
+    TVSource(key: "HDMI2", title: "HDMI 2",      hotkey: HotkeySpec(keyCode: UInt32(kVK_ANSI_2), mods: UInt32(controlKey | optionKey))),
+    TVSource(key: "DP",    title: "DisplayPort", hotkey: nil),
+    TVSource(key: "USBC",  title: "USB-C",       hotkey: nil),
 ]
+
+// MARK: - 快捷键配置
+//
+// 动作 id 是稳定的字符串，用户改过的键存在 UserDefaults 里，
+// 没存过就用上面的默认值。空字符串表示「这个动作不绑键」。
+
+let kHotkeysKey = "hotkeyMap"
+
+func defaultHotkeys() -> [String: HotkeySpec] {
+    var m: [String: HotkeySpec] = [:]
+    for s in allSources { if let h = s.hotkey { m["src.\(s.key)"] = h } }
+    m["vol.up"]     = HotkeySpec(keyCode: UInt32(kVK_UpArrow),   mods: UInt32(controlKey | optionKey | shiftKey))
+    m["vol.down"]   = HotkeySpec(keyCode: UInt32(kVK_DownArrow), mods: UInt32(controlKey | optionKey | shiftKey))
+    m["bright.up"]  = HotkeySpec(keyCode: UInt32(kVK_UpArrow),   mods: UInt32(controlKey | optionKey))
+    m["bright.down"] = HotkeySpec(keyCode: UInt32(kVK_DownArrow), mods: UInt32(controlKey | optionKey))
+    return m
+}
+
+/// 某个动作当前生效的快捷键；返回 nil 表示不绑
+func hotkey(for action: String) -> HotkeySpec? {
+    let raw = UserDefaults.standard.dictionary(forKey: kHotkeysKey) as? [String: String]
+    if let stored = raw?[action] {
+        if stored.isEmpty { return nil }              // 用户主动清空
+        let parts = stored.split(separator: ":")
+        if parts.count == 2, let c = UInt32(parts[0]), let m = UInt32(parts[1]) {
+            return HotkeySpec(keyCode: c, mods: m)
+        }
+        return nil
+    }
+    return defaultHotkeys()[action]
+}
+
+func setHotkey(_ spec: HotkeySpec?, for action: String) {
+    var raw = (UserDefaults.standard.dictionary(forKey: kHotkeysKey) as? [String: String]) ?? [:]
+    if let s = spec {
+        raw[action] = "\(s.keyCode):\(s.mods)"
+    } else {
+        raw[action] = ""                              // 空串 = 明确不绑
+    }
+    UserDefaults.standard.set(raw, forKey: kHotkeysKey)
+}
+
+func resetHotkeys() {
+    UserDefaults.standard.removeObject(forKey: kHotkeysKey)
+}
+
+/// 把快捷键渲染成 ⌃⌥1 这种形式，显示在菜单和面板里
+func formatHotkey(_ s: HotkeySpec?) -> String {
+    guard let s = s else { return "未设置" }
+    var out = ""
+    if s.mods & UInt32(controlKey) != 0 { out += "⌃" }
+    if s.mods & UInt32(optionKey)  != 0 { out += "⌥" }
+    if s.mods & UInt32(shiftKey)   != 0 { out += "⇧" }
+    if s.mods & UInt32(cmdKey)     != 0 { out += "⌘" }
+    return out + keyName(s.keyCode)
+}
+
+func keyName(_ code: UInt32) -> String {
+    switch Int(code) {
+    case kVK_ANSI_0: return "0"
+    case kVK_ANSI_1: return "1"
+    case kVK_ANSI_2: return "2"
+    case kVK_ANSI_3: return "3"
+    case kVK_ANSI_4: return "4"
+    case kVK_ANSI_5: return "5"
+    case kVK_ANSI_6: return "6"
+    case kVK_ANSI_7: return "7"
+    case kVK_ANSI_8: return "8"
+    case kVK_ANSI_9: return "9"
+    case kVK_UpArrow:   return "↑"
+    case kVK_DownArrow: return "↓"
+    case kVK_LeftArrow: return "←"
+    case kVK_RightArrow: return "→"
+    case kVK_Space:     return "空格"
+    case kVK_Return:    return "回车"
+    case kVK_F1:  return "F1"
+    case kVK_F2:  return "F2"
+    case kVK_F3:  return "F3"
+    case kVK_F4:  return "F4"
+    case kVK_F5:  return "F5"
+    case kVK_F6:  return "F6"
+    case kVK_F7:  return "F7"
+    case kVK_F8:  return "F8"
+    case kVK_F9:  return "F9"
+    case kVK_F10: return "F10"
+    case kVK_F11: return "F11"
+    case kVK_F12: return "F12"
+    default:
+        // 字母键的 keyCode 不连续，用当前键盘布局反查
+        if let src = CGEventSource(stateID: .hidSystemState),
+           let ev = CGEvent(keyboardEventSource: src, virtualKey: CGKeyCode(code), keyDown: true),
+           let ns = NSEvent(cgEvent: ev) {
+            let s = ns.charactersIgnoringModifiers?.uppercased() ?? ""
+            if !s.isEmpty { return s }
+        }
+        return "键\(code)"
+    }
+}
+
+/// 所有可绑定快捷键的动作，控制面板和注册逻辑共用
+struct HotkeyAction {
+    let id: String
+    let title: String
+    let group: String
+}
+
+func allHotkeyActions() -> [HotkeyAction] {
+    var out: [HotkeyAction] = []
+    for s in allSources {
+        out.append(HotkeyAction(id: "src.\(s.key)", title: "切到 \(s.title)", group: "信号源"))
+    }
+    out.append(HotkeyAction(id: "vol.up",      title: "音量 +",  group: "音量"))
+    out.append(HotkeyAction(id: "vol.down",    title: "音量 −",  group: "音量"))
+    out.append(HotkeyAction(id: "bright.up",   title: "亮度 +",  group: "画面"))
+    out.append(HotkeyAction(id: "bright.down", title: "亮度 −",  group: "画面"))
+    return out
+}
+
+/// 执行一个动作（菜单、面板、全局热键都走这里）
+func runAction(_ action: String) {
+    if action.hasPrefix("src.") {
+        AppDelegate.shared.performSwitch(String(action.dropFirst(4)))
+        return
+    }
+    switch action {
+    case "vol.up":      stepVolume(up: true)
+    case "vol.down":    stepVolume(up: false)
+    case "bright.up":   if gammaLevelIndex > 0 { gammaLevelIndex -= 1; applyGammaPreset() }
+    case "bright.down": if gammaLevelIndex < kBrightnessSteps.count - 1 { gammaLevelIndex += 1; applyGammaPreset() }
+    default: break
+    }
+    DispatchQueue.main.async {
+        AppDelegate.shared.buildMenu()
+        PanelController.shared.refresh()
+    }
+}
 
 // MARK: - 设备信号源
 //
@@ -318,14 +458,14 @@ func stepVolume(up: Bool, steps: Int = 2) {
 // MARK: - 双模显示器的竞技模式
 //
 // G Pro 27U 这类双模显示器在 4K160 与 1080p320 之间切换要换 EDID，
-// 没有对应接口，只能走按键宏：menu 打开游戏栏，右移 5 次到模式项，
-// enter 进入，right 开 / left 关。这套按键序列来自 MonitorBar
-// （MIT，© 2026 binaryify），见 NOTICE。
+// 没有对应接口，只能走按键宏：menu 打开游戏栏，右移 4 次到模式项，
+// enter 进入，right 开 / left 关。按键序列由冰哥实测确认。
+// 思路参考 MonitorBar（MIT，© 2026 binaryify），见 NOTICE。
 
 func setCompetitiveMode(on: Bool) {
     let steps: [(key: String, wait: useconds_t)] = [
         ("menu", 700_000),
-        ("right", 100_000), ("right", 100_000), ("right", 100_000),
+        ("right", 100_000), ("right", 100_000),
         ("right", 100_000), ("right", 100_000),
         ("enter", 300_000),
         (on ? "right" : "left", 0),
@@ -542,15 +682,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func buildMenu() {
         let menu = NSMenu()
 
-        let head = NSMenuItem(title: tvHost.isEmpty ? "未设置显示器地址" : "显示器信号源 · \(tvHost)", action: nil, keyEquivalent: "")
+        let panelItem = NSMenuItem(title: "打开控制面板…", action: #selector(openPanel), keyEquivalent: "")
+        panelItem.target = self
+        menu.addItem(panelItem)
+
+        let head = NSMenuItem(title: tvHost.isEmpty ? "未设置显示器地址" : "显示器 · \(tvHost)", action: nil, keyEquivalent: "")
         head.isEnabled = false
         menu.addItem(head)
         menu.addItem(.separator())
 
         for s in allSources {
             var title = "   " + s.title
-            if s.hotKeyCode == UInt32(kVK_ANSI_1) { title += "    ⌃⌥1" }
-            if s.hotKeyCode == UInt32(kVK_ANSI_2) { title += "    ⌃⌥2" }
+            let hk = formatHotkey(hotkey(for: "src.\(s.key)"))
+            if hk != "未设置" { title += "    " + hk }
             let item = NSMenuItem(title: title, action: #selector(menuSwitch(_:)), keyEquivalent: "")
             item.representedObject = s.key
             item.target = self
@@ -564,12 +708,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
 
         // 音量（走局域网遥控按键，不依赖 DDC）
-        let volUp = NSMenuItem(title: "音量 +", action: #selector(volumeUp(_:)), keyEquivalent: "")
+        let volUp = NSMenuItem(title: "音量 +    " + formatHotkey(hotkey(for: "vol.up")),
+                               action: #selector(volumeUp(_:)), keyEquivalent: "")
         volUp.target = self
-        volUp.title = "音量 +    ⌃⌥⇧↑"
-        let volDown = NSMenuItem(title: "音量 −", action: #selector(volumeDown(_:)), keyEquivalent: "")
+        let volDown = NSMenuItem(title: "音量 −    " + formatHotkey(hotkey(for: "vol.down")),
+                                 action: #selector(volumeDown(_:)), keyEquivalent: "")
         volDown.target = self
-        volDown.title = "音量 −    ⌃⌥⇧↓"
         let volShow = NSMenuItem(title: "查看当前音量", action: #selector(showVolume(_:)), keyEquivalent: "")
         volShow.target = self
         menu.addItem(submenu("音量", [volUp, volDown, .separator(), volShow]))
@@ -577,7 +721,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 画面：软件调光 + 色温
         var picItems: [NSMenuItem] = []
         for (i, name) in kBrightnessNames.enumerated() {
-            let it = NSMenuItem(title: "亮度 \(name)    ⌃⌥\(i == 0 ? "↑ 到最亮" : "↑↓")",
+            let it = NSMenuItem(title: "亮度 \(name)",
                                 action: #selector(pickBrightness(_:)), keyEquivalent: "")
             it.tag = i
             it.target = self
@@ -639,6 +783,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func menuSwitch(_ sender: NSMenuItem) {
         guard let key = sender.representedObject as? String else { return }
         performSwitch(key)
+    }
+
+    @objc func openPanel() {
+        PanelController.shared.show()
     }
 
     func performSwitch(_ key: String) {
@@ -822,62 +970,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: 全局热键
 
-    /// 非信号源类热键：id 从 100 起，避免和 allSources 的下标撞车
-    static let extras: [(label: String, keyCode: UInt32, mods: UInt32, run: () -> Void)] = [
-        ("音量 +",   UInt32(kVK_UpArrow),   UInt32(controlKey | optionKey | shiftKey), {
-            stepVolume(up: true)
-        }),
-        ("音量 −",   UInt32(kVK_DownArrow), UInt32(controlKey | optionKey | shiftKey), {
-            stepVolume(up: false)
-        }),
-        ("亮度 +",   UInt32(kVK_UpArrow),   UInt32(controlKey | optionKey), {
-            if gammaLevelIndex > 0 { gammaLevelIndex -= 1; applyGammaPreset() }
-        }),
-        ("亮度 −",   UInt32(kVK_DownArrow), UInt32(controlKey | optionKey), {
-            if gammaLevelIndex < kBrightnessSteps.count - 1 { gammaLevelIndex += 1; applyGammaPreset() }
-        }),
-    ]
+    /// 当前注册的 (动作 id, 引用)，改键时先全部注销再重注册
+    private static var registeredRefs: [EventHotKeyRef] = []
+    /// hkID → 动作 id
+    private static var idToAction: [UInt32: String] = [:]
+    private static var handlerInstalled = false
 
     func registerHotKeys() {
-        var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard),
-                                 eventKind: UInt32(kEventHotKeyPressed))
-        InstallEventHandler(GetApplicationEventTarget(), { (_, event, _) -> OSStatus in
-            var hkID = EventHotKeyID()
-            GetEventParameter(event, EventParamName(kEventParamDirectObject),
-                              EventParamType(typeEventHotKeyID), nil,
-                              MemoryLayout<EventHotKeyID>.size, nil, &hkID)
-            let idx = Int(hkID.id)
-            DispatchQueue.main.async {
-                if idx >= 0 && idx < allSources.count {
-                    AppDelegate.shared.performSwitch(allSources[idx].key)
-                } else if idx >= 100 {
-                    let e = idx - 100
-                    if e >= 0 && e < AppDelegate.extras.count {
-                        AppDelegate.extras[e].run()
-                        AppDelegate.shared.buildMenu()
-                    }
+        if !AppDelegate.handlerInstalled {
+            var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard),
+                                     eventKind: UInt32(kEventHotKeyPressed))
+            InstallEventHandler(GetApplicationEventTarget(), { (_, event, _) -> OSStatus in
+                var hkID = EventHotKeyID()
+                GetEventParameter(event, EventParamName(kEventParamDirectObject),
+                                  EventParamType(typeEventHotKeyID), nil,
+                                  MemoryLayout<EventHotKeyID>.size, nil, &hkID)
+                let rid = hkID.id
+                DispatchQueue.main.async {
+                    if let action = AppDelegate.idToAction[rid] { runAction(action) }
                 }
-            }
-            return noErr
-        }, 1, &spec, nil, nil)
-
-        for (i, s) in allSources.enumerated() where s.hotKeyCode != 0 {
-            var ref: EventHotKeyRef?
-            let hkID = EventHotKeyID(signature: OSType(0x4D545653), id: UInt32(i))
-            if RegisterEventHotKey(s.hotKeyCode, s.hotMods, hkID,
-                                   GetApplicationEventTarget(), 0, &ref) != noErr {
-                logLine("热键注册失败：\(s.title)")
-            }
+                return noErr
+            }, 1, &spec, nil, nil)
+            AppDelegate.handlerInstalled = true
         }
 
-        for (i, e) in AppDelegate.extras.enumerated() {
+        reloadHotkeys()
+    }
+
+    /// 按当前配置重新注册所有全局热键
+    func reloadHotkeys() {
+        for ref in AppDelegate.registeredRefs { UnregisterEventHotKey(ref) }
+        AppDelegate.registeredRefs.removeAll()
+        AppDelegate.idToAction.removeAll()
+
+        var next: UInt32 = 1
+        for a in allHotkeyActions() {
+            guard let hk = hotkey(for: a.id) else { continue }
             var ref: EventHotKeyRef?
-            let hkID = EventHotKeyID(signature: OSType(0x4D545653), id: UInt32(100 + i))
-            if RegisterEventHotKey(e.keyCode, e.mods, hkID,
-                                   GetApplicationEventTarget(), 0, &ref) != noErr {
-                logLine("热键注册失败：\(e.label)")
+            let hkID = EventHotKeyID(signature: OSType(0x4D545653), id: next)
+            let st = RegisterEventHotKey(hk.keyCode, hk.mods, hkID,
+                                         GetApplicationEventTarget(), 0, &ref)
+            if st == noErr, let r = ref {
+                AppDelegate.registeredRefs.append(r)
+                AppDelegate.idToAction[next] = a.id
+                next += 1
+            } else {
+                logLine("热键注册失败：\(a.title) \(formatHotkey(hk)) status=\(st)")
             }
         }
+        logLine("热键已注册 \(AppDelegate.registeredRefs.count) 个")
     }
 
     // MARK: 睡眠 / 唤醒
@@ -914,6 +1055,336 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             alert("开机启动设置失败", "\(error.localizedDescription)\n\n请先把 App 放到 /Applications 后再试。")
         }
+    }
+}
+
+// MARK: - 控制面板
+
+func carbonMods(_ f: NSEvent.ModifierFlags) -> UInt32 {
+    var m: UInt32 = 0
+    if f.contains(.control) { m |= UInt32(controlKey) }
+    if f.contains(.option)  { m |= UInt32(optionKey) }
+    if f.contains(.shift)   { m |= UInt32(shiftKey) }
+    if f.contains(.command) { m |= UInt32(cmdKey) }
+    return m
+}
+
+/// 捕获一次按键，用于录制快捷键
+final class KeyCaptureView: NSView {
+    var onCapture: ((HotkeySpec?) -> Void)?
+    override var acceptsFirstResponder: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.windowBackgroundColor.setFill()
+        dirtyRect.fill()
+    }
+
+    func addHint(_ title: String) {
+        let l = NSTextField(wrappingLabelWithString:
+            "\(title)\n\n按下新的组合键（需含 ⌃ ⌥ ⇧ ⌘ 至少一个）\nEsc 取消 · Delete 清除绑定")
+        l.alignment = .center
+        l.frame = NSRect(x: 24, y: 24, width: 292, height: 96)
+        l.autoresizingMask = [.width, .height]
+        addSubview(l)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == UInt16(kVK_Escape) { onCapture?(nil); return }
+        if event.keyCode == UInt16(kVK_Delete) || event.keyCode == UInt16(kVK_ForwardDelete) {
+            onCapture?(HotkeySpec(keyCode: 0, mods: 0))   // 0/0 表示清除
+            return
+        }
+        let mods = carbonMods(event.modifierFlags)
+        if mods == 0 {
+            NSSound.beep()      // 单个按键不做全局热键
+            return
+        }
+        onCapture?(HotkeySpec(keyCode: UInt32(event.keyCode), mods: mods))
+    }
+}
+
+final class PanelController: NSObject {
+    static let shared = PanelController()
+
+    private var window: NSWindow?
+    private var volumeLabel: NSTextField?
+    private var deviceLabel: NSTextField?
+
+    func toggle() {
+        if window?.isVisible == true { hide() } else { show() }
+    }
+
+    func hide() { window?.orderOut(nil) }
+
+    func show() {
+        let view = buildContent()
+        if window == nil {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 380, height: 200),
+                             styleMask: [.titled, .closable],
+                             backing: .buffered, defer: false)
+            w.title = "MiTVSwitch"
+            w.isReleasedWhenClosed = false
+            w.level = .floating
+            window = w
+        }
+        window?.contentView = view
+        window?.setContentSize(view.frame.size)
+        window?.center()
+        window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        refreshLiveInfo()
+    }
+
+    /// 面板开着时，动作执行后刷新数值
+    func refresh() {
+        guard let w = window, w.isVisible else { return }
+        let old = w.frame
+        let view = buildContent()
+        w.contentView = view
+        w.setContentSize(view.frame.size)
+        w.setFrameOrigin(old.origin)
+        refreshLiveInfo()
+    }
+
+    // ── 读取设备实时信息 ────────────────────────────────────
+
+    private func refreshLiveInfo() {
+        DispatchQueue.main.async { [weak self] in
+            self?.deviceLabel?.stringValue = tvHost.isEmpty
+                ? "未设置显示器地址"
+                : "设备 \(tvHost)"
+        }
+        guard !tvHost.isEmpty else { return }
+        DispatchQueue.global().async { [weak self] in
+            let name = deviceName(from: apiPath("/request?action=isalive").body)
+            let vol = readVolume()
+            if deviceSources.isEmpty { refreshSources() }
+            DispatchQueue.main.async {
+                if let n = name {
+                    self?.deviceLabel?.stringValue = n
+                }
+                if let v = vol {
+                    self?.volumeLabel?.stringValue = "\(v.value) / \(v.max)"
+                } else {
+                    self?.volumeLabel?.stringValue = "—"
+                }
+            }
+        }
+    }
+
+    // ── 布局辅助 ────────────────────────────────────────────
+
+    private func titleLabel(_ text: String) -> NSTextField {
+        let l = NSTextField(labelWithString: text)
+        l.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        l.textColor = .secondaryLabelColor
+        return l
+    }
+
+    private func bodyLabel(_ text: String, size: CGFloat = 12) -> NSTextField {
+        let l = NSTextField(labelWithString: text)
+        l.font = NSFont.systemFont(ofSize: size)
+        return l
+    }
+
+    private func button(_ title: String, _ action: Selector, tag: Int = 0, width: CGFloat = 0) -> NSButton {
+        let b = NSButton(title: title, target: self, action: action)
+        b.bezelStyle = .rounded
+        b.tag = tag
+        if width > 0 { b.widthAnchor.constraint(equalToConstant: width).isActive = true }
+        return b
+    }
+
+    private func row(_ views: [NSView]) -> NSStackView {
+        let s = NSStackView(views: views)
+        s.orientation = .horizontal
+        s.alignment = .centerY
+        s.spacing = 8
+        return s
+    }
+
+    // ── 主体 ────────────────────────────────────────────────
+
+    private func buildContent() -> NSView {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 10
+
+        // 头部
+        let name = NSTextField(labelWithString: "MiTVSwitch")
+        name.font = NSFont.systemFont(ofSize: 17, weight: .semibold)
+        deviceLabel = bodyLabel(tvHost.isEmpty ? "未设置显示器地址" : "设备 \(tvHost)", size: 11)
+        deviceLabel?.textColor = .secondaryLabelColor
+        stack.addArrangedSubview(name)
+        if let d = deviceLabel { stack.addArrangedSubview(d) }
+
+        // 信号源
+        stack.addArrangedSubview(titleLabel("信号源"))
+        var srcViews: [NSView] = []
+        for s in allSources {
+            let has = deviceSources.isEmpty || resolveSourceID(s.key) != nil
+            let b = button(s.title, #selector(doSwitch(_:)), tag: 0, width: 84)
+            b.identifier = NSUserInterfaceItemIdentifier(s.key)
+            b.isEnabled = has
+            b.toolTip = has ? "切到 \(s.title)（\(formatHotkey(hotkey(for: "src.\(s.key)")))）"
+                            : "设备没有报告这个输入"
+            srcViews.append(b)
+        }
+        // 每行两个
+        for chunk in stride(from: 0, to: srcViews.count, by: 2).map({ Array(srcViews[$0..<min($0 + 2, srcViews.count)]) }) {
+            stack.addArrangedSubview(row(chunk))
+        }
+
+        // 音量
+        stack.addArrangedSubview(titleLabel("显示器音量"))
+        let volText = bodyLabel("—", size: 13)
+        volText.alignment = .center
+        volText.widthAnchor.constraint(greaterThanOrEqualToConstant: 72).isActive = true
+        volumeLabel = volText
+        let volRow = row([
+            button("−", #selector(volDown), width: 44),
+            volText,
+            button("+", #selector(volUp), width: 44),
+        ])
+        stack.addArrangedSubview(volRow)
+
+        // 画面
+        stack.addArrangedSubview(titleLabel("画面（软件调光 / 色温）"))
+        let seg = NSSegmentedControl(labels: kBrightnessNames, trackingMode: .selectOne,
+                                     target: self, action: #selector(brightnessChanged(_:)))
+        seg.selectedSegment = gammaLevelIndex
+        stack.addArrangedSubview(row([bodyLabel("亮度"), seg]))
+
+        let popup = NSPopUpButton(frame: .zero, pullsDown: false)
+        popup.addItems(withTitles: kTempNames)
+        popup.selectItem(at: gammaTempIndex)
+        popup.target = self
+        popup.action = #selector(tempChanged(_:))
+        popup.widthAnchor.constraint(equalToConstant: 140).isActive = true
+        stack.addArrangedSubview(row([bodyLabel("色温"), popup]))
+
+        // 快捷键
+        stack.addArrangedSubview(titleLabel("快捷键（点右侧按键可重新录制）"))
+        var lastGroup = ""
+        for a in allHotkeyActions() {
+            if a.group != lastGroup {
+                let g = bodyLabel(a.group, size: 11)
+                g.textColor = .tertiaryLabelColor
+                stack.addArrangedSubview(g)
+                lastGroup = a.group
+            }
+            let name = bodyLabel(a.title)
+            name.widthAnchor.constraint(equalToConstant: 96).isActive = true
+            let key = NSButton(title: formatHotkey(hotkey(for: a.id)), target: self,
+                               action: #selector(recordHotkey(_:)))
+            key.bezelStyle = .rounded
+            key.identifier = NSUserInterfaceItemIdentifier(a.id)
+            key.widthAnchor.constraint(equalToConstant: 108).isActive = true
+            stack.addArrangedSubview(row([name, key]))
+        }
+        stack.addArrangedSubview(button("恢复默认快捷键", #selector(resetKeys)))
+
+        // 底部
+        let line = NSBox()
+        line.boxType = .separator
+        stack.addArrangedSubview(line)
+        stack.addArrangedSubview(row([
+            button("测试连接", #selector(doTest)),
+            button("搜索设备…", #selector(doDiscover)),
+            button("关闭", #selector(doClose)),
+        ]))
+
+        // 放到容器里，按 stack 的固有高度定尺寸
+        let container = NSView()
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 18),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -18),
+            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 16),
+            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -16),
+        ])
+        container.frame = NSRect(x: 0, y: 0, width: 380, height: 100)
+        container.layoutSubtreeIfNeeded()
+        let h = stack.fittingSize.height + 32
+        container.frame = NSRect(x: 0, y: 0, width: 380, height: h)
+        return container
+    }
+
+    // ── 动作 ────────────────────────────────────────────────
+
+    @objc private func doSwitch(_ sender: NSButton) {
+        guard let key = sender.identifier?.rawValue else { return }
+        AppDelegate.shared.performSwitch(key)
+    }
+
+    @objc private func volUp()   { stepVolume(up: true);  refreshLiveInfo() }
+    @objc private func volDown() { stepVolume(up: false); refreshLiveInfo() }
+
+    @objc private func brightnessChanged(_ sender: NSSegmentedControl) {
+        gammaLevelIndex = sender.selectedSegment
+        applyGammaPreset()
+        AppDelegate.shared.buildMenu()
+    }
+
+    @objc private func tempChanged(_ sender: NSPopUpButton) {
+        gammaTempIndex = sender.indexOfSelectedItem
+        applyGammaPreset()
+        AppDelegate.shared.buildMenu()
+    }
+
+    @objc private func doTest() {
+        AppDelegate.shared.testConn()
+        refresh()
+    }
+
+    @objc private func doDiscover() {
+        hide()
+        AppDelegate.shared.discover(nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self] in self?.refresh() }
+    }
+
+    @objc private func doClose() { hide() }
+
+    @objc private func resetKeys() {
+        resetHotkeys()
+        AppDelegate.shared.reloadHotkeys()
+        AppDelegate.shared.buildMenu()
+        refresh()
+    }
+
+    @objc private func recordHotkey(_ sender: NSButton) {
+        guard let action = sender.identifier?.rawValue else { return }
+        let title = allHotkeyActions().first(where: { $0.id == action })?.title ?? action
+
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 340, height: 132),
+                         styleMask: [.titled], backing: .buffered, defer: false)
+        w.title = "设置快捷键"
+        w.level = .floating
+        w.isReleasedWhenClosed = false
+
+        let v = KeyCaptureView(frame: NSRect(x: 0, y: 0, width: 340, height: 132))
+        v.addHint(title)
+        v.onCapture = { spec in
+            w.orderOut(nil)
+            if let s = spec {
+                if s.keyCode == 0 && s.mods == 0 {
+                    setHotkey(nil, for: action)          // 清除
+                } else {
+                    setHotkey(s, for: action)
+                }
+            }
+            AppDelegate.shared.reloadHotkeys()
+            AppDelegate.shared.buildMenu()
+            self.refresh()
+            logLine("快捷键 \(action) -> \(formatHotkey(hotkey(for: action)))")
+        }
+        w.contentView = v
+        w.center()
+        w.makeKeyAndOrderFront(nil)
+        w.makeFirstResponder(v)
+        NSApp.activate(ignoringOtherApps: true)
     }
 }
 

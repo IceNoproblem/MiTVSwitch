@@ -25,8 +25,8 @@ Licensed under the MIT License (全文见本文件末尾)
    因此按编号纠正名字。
 
 3. 双模显示器（如 REDMI G Pro 27U）4K 160Hz ↔ 1080p 320Hz 的切换方式
-   没有对应接口，只能走遥控按键宏：
-   menu → right × 5 → enter → right（开）/ left（关）→ back × 2
+   没有对应接口，只能走遥控按键宏。具体按键次数以本机实测为准
+   （当前为 menu → right × 4 → enter → right（开）/ left（关）→ back × 2）。
 
 4. 软件调光与色温的做法
    改写显卡 Gamma 查色表（macOS CGSetDisplayTransferByTable /

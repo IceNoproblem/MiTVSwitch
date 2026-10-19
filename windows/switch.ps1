@@ -202,10 +202,10 @@ switch ($Action.ToLower()) {
             Write-Host "用法: .\switch.ps1 comp on|off" ; exit 1
         }
         # 没有对应接口，只能走按键宏：
-        # menu 打开游戏栏 → 右移 5 次到模式项 → enter 进入 → right 开 / left 关
+        # menu 打开游戏栏 → 右移 4 次到模式项 → enter 进入 → right 开 / left 关
         Write-Host "切换中，显示器会黑一下并换 EDID…"
         Invoke-Key "menu";  Start-Sleep -Milliseconds 700
-        foreach ($i in 1..5) { Invoke-Key "right"; Start-Sleep -Milliseconds 100 }
+        foreach ($i in 1..4) { Invoke-Key "right"; Start-Sleep -Milliseconds 100 }
         Invoke-Key "enter"; Start-Sleep -Milliseconds 300
         if ($on -eq "on") { Invoke-Key "right" } else { Invoke-Key "left" }
         Invoke-Key "back"

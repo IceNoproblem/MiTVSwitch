@@ -9,9 +9,9 @@
     <key>CFBundleIdentifier</key>
     <string>top.icenoproblem.mitvswitch</string>
     <key>CFBundleVersion</key>
-    <string>1.1</string>
+    <string>1.2</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.1</string>
+    <string>1.2</string>
     <key>CFBundleExecutable</key>
     <string>MiTVSwitch</string>
     <key>CFBundlePackageType</key>

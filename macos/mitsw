@@ -131,10 +131,10 @@ case "$1" in
       print "用法: mitsw comp on|off"; exit 1
     fi
     # 没有对应接口，只能走按键宏：
-    # menu 打开游戏栏 → 右移 5 次到模式项 → enter 进入 → right 开 / left 关
+    # menu 打开游戏栏 → 右移 4 次到模式项 → enter 进入 → right 开 / left 关
     print "切换中，显示器会黑一下并换 EDID…"
     get "/controller?action=keyevent&keycode=menu" >/dev/null; sleep 0.7
-    for i in 1 2 3 4 5; do
+    for i in 1 2 3 4; do
       get "/controller?action=keyevent&keycode=right" >/dev/null; sleep 0.1
     done
     get "/controller?action=keyevent&keycode=enter" >/dev/null; sleep 0.3

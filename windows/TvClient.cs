@@ -224,14 +224,14 @@ namespace MiTVSwitch
         // ── 双模显示器的竞技模式 ────────────────────────────────
         //
         // 4K160 ↔ 1080p320 要换 EDID，没有对应接口，只能走按键宏：
-        // menu 打开游戏栏 → 右移 5 次到模式项 → enter → right 开 / left 关。
-        // 这套序列来自 MonitorBar（MIT，© 2026 binaryify），见 NOTICE。
+        // menu 打开游戏栏 → 右移 4 次到模式项 → enter → right 开 / left 关。
+        // 按键序列由冰哥实测确认。
 
         public static async Task SetCompetitiveAsync(string host, bool on)
         {
             await PressAsync(host, "menu").ConfigureAwait(false);
             await Task.Delay(700).ConfigureAwait(false);
-            for (int i = 0; i < 5; i++)
+            for (int i = 0; i < 4; i++)
             {
                 await PressAsync(host, "right").ConfigureAwait(false);
                 await Task.Delay(100).ConfigureAwait(false);
