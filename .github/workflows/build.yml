@@ -65,6 +65,17 @@ jobs:
     permissions:
       contents: write
     steps:
+      # 正文要取 annotated tag 的说明文字，先把仓库（含 tag）拉下来
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 导出 tag 说明作为 Release 正文
+        run: |
+          git for-each-ref --format='%(contents:body)' "refs/tags/${{ github.ref_name }}" > /tmp/release-body.md
+          echo "----- Release 正文 -----"
+          cat /tmp/release-body.md
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -89,9 +100,11 @@ jobs:
             echo "found=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # 不设 generate_release_notes：这样 Release 正文取的是 annotated tag 的说明文字，
-      # 打 tag 时写清楚发版内容即可，不用再单独维护一份。
+      # 不设 generate_release_notes；正文用 body_path 喂 annotated tag 的说明。
+      # 注意：action-gh-release 不会自动拿 tag 说明当正文（v1.3.1 实测空正文），必须显式给 body_path。
+      # 打 tag 时把发版内容写进 tag message 的正文段（首行是标题，空行后写 markdown 列表）。
       - uses: softprops/action-gh-release@v2
         if: steps.exists.outputs.found == 'false'
         with:
+          body_path: /tmp/release-body.md
           files: files/*
