@@ -885,6 +885,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             picItems.append(it)
         }
         picItems.append(.separator())
+        // 场景：跟 Windows 托盘菜单同构（亮度 / 色温 / 场景 / 恢复）
+        for (i, sc) in kScenes.enumerated() {
+            let it = NSMenuItem(title: "场景：" + sc.name, action: #selector(pickScene(_:)), keyEquivalent: "")
+            it.tag = i
+            it.target = self
+            picItems.append(it)
+        }
+        picItems.append(.separator())
         let resetPic = NSMenuItem(title: "恢复原始画面", action: #selector(resetPicture(_:)), keyEquivalent: "")
         resetPic.target = self
         picItems.append(resetPic)
@@ -896,7 +904,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
-        let auto = NSMenuItem(title: "睡眠时切到第 1 个源", action: #selector(toggleAuto(_:)), keyEquivalent: "")
+        // 与 Windows 托盘同文案：睡眠时切到第 1 个源（醒来切到第 2 个）
+        let auto = NSMenuItem(title: "睡眠时切到「\(allSources[0].title)」", action: #selector(toggleAuto(_:)), keyEquivalent: "")
         auto.target = self
         auto.state = UserDefaults.standard.bool(forKey: kAutoSleepKey) ? .on : .off
         menu.addItem(auto)
@@ -914,6 +923,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let test = NSMenuItem(title: "测试连接", action: #selector(testConn), keyEquivalent: "")
         test.target = self
         menu.addItem(test)
+
+        let logItem = NSMenuItem(title: "查看日志", action: #selector(openLog(_:)), keyEquivalent: "")
+        logItem.target = self
+        menu.addItem(logItem)
 
         menu.addItem(.separator())
 
@@ -986,6 +999,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// 打开日志文件（与 Windows 托盘的「查看日志」对齐）
+    @objc func openLog(_ sender: Any?) {
+        if !FileManager.default.fileExists(atPath: kLogFile) {
+            try? FileManager.default.createDirectory(
+                atPath: (kLogFile as NSString).deletingLastPathComponent,
+                withIntermediateDirectories: true)
+            FileManager.default.createFile(atPath: kLogFile, contents: nil)
+        }
+        NSWorkspace.shared.open(URL(fileURLWithPath: kLogFile))
+    }
+
     @objc func pickBrightness(_ sender: NSMenuItem) {
         guard sender.tag >= 0 && sender.tag < kBrightnessPercents.count else { return }
         setBrightnessPercent(kBrightnessPercents[sender.tag])
@@ -996,6 +1020,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func pickTemp(_ sender: NSMenuItem) {
         gammaTempIndex = sender.tag
         applyPicture()
+        buildMenu()
+        SettingsPanel.shared.syncPicture()
+    }
+
+    @objc func pickScene(_ sender: NSMenuItem) {
+        applyScene(sender.tag)
         buildMenu()
         SettingsPanel.shared.syncPicture()
     }

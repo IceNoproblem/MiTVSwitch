@@ -48,7 +48,8 @@ jobs:
       - name: 打包
         run: |
           cd macos
-          ditto -c -k --sequesterRsrc --keepParent MiTVSwitch.app MiTVSwitch-macos.zip
+          # build.sh 产物在 out.noindex/（.noindex 目录 Spotlight 不索引，避免启动台双图标）
+          ditto -c -k --sequesterRsrc --keepParent out.noindex/MiTVSwitch.app MiTVSwitch-macos.zip
 
       - uses: actions/upload-artifact@v4
         with:

@@ -1,6 +1,8 @@
 # 构建产物
 MiTVSwitch.app/
 *.app
+out.noindex/
+macos/vendor/
 .objects/
 dist/
 bin/

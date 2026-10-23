@@ -80,11 +80,11 @@ git clone https://github.com/IceNoproblem/MiTVSwitch.git
 cd MiTVSwitch/macos
 chmod +x build.sh
 ./build.sh
-cp -R MiTVSwitch.app /Applications/
+cp -R out.noindex/MiTVSwitch.app /Applications/
 open /Applications/MiTVSwitch.app
 ```
 
-编译不需要开发者账号，脚本用 ad-hoc 签名，本机自用够。装到 `/Applications` 是因为「开机自动启动」依赖这个位置。
+编译不需要开发者账号，脚本用 ad-hoc 签名，本机自用够。装到 `/Applications` 是因为「开机自动启动」依赖这个位置。产物放在 `out.noindex/`：带 `.noindex` 的目录 Spotlight 不索引，免得编译出来的 App 跟 `/Applications` 里那份一起出现在启动台里，看着像装了两个。
 
 ### Windows
 
