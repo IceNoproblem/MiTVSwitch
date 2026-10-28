@@ -2,9 +2,9 @@
 
 一个快捷键，把显示器切到游戏机；再一个快捷键，切回电脑。
 
-不做红外、不拆机、不改接线 —— 直接走小米设备局域网里的 `6095` 接口控制信号源，顺带把音量、亮度、色温、场景、分辨率、屏幕时间都收进一个设置面板。
+不做红外、不拆机、不改接线。直接走小米设备局域网里的 `6095` 接口控制信号源，顺带把音量、亮度、色温、场景、分辨率、屏幕时间都收进一个设置面板。
 
-**macOS 菜单栏 + Windows 托盘，双平台。**
+macOS 菜单栏 + Windows 托盘，双平台。
 
 [![bilibili](https://img.shields.io/badge/Bilibili-主页-00A1D6?logo=bilibili&logoColor=white)](https://space.bilibili.com/2250922)
 [![release](https://img.shields.io/github/v/release/IceNoproblem/MiTVSwitch?color=blue)](https://github.com/IceNoproblem/MiTVSwitch/releases)
@@ -14,19 +14,15 @@
 
 ![设置面板](docs/panel.png)
 
----
-
-## 这个项目解决什么问题
+## 为什么做这个
 
 一台显示器同时接游戏机和电脑，是很常见但很难受的配置：
 
 - 显示器自带的「自动切换信号源」判断不准，两个设备都待机时会来回跳
-- 电脑休眠时显示器判定无信号进入待机，通过 HDMI-CEC 广播 System Standby，**把游戏机一起关了**
+- 电脑休眠时显示器判定无信号进入待机，通过 HDMI-CEC 广播 System Standby，把游戏机一起关了
 - 想手动切，得长按遥控器菜单键 → 进「信号源」→ 选中接口，三四步
 
-所以绕开遥控器和 OSD，直接调设备的 HTTP 接口。按一个键，屏幕就跳过去 —— 而且**不需要电脑屏幕在显示中**，显示器正放着游戏机画面时照样生效。
-
----
+所以绕开遥控器和 OSD，直接调设备的 HTTP 接口。按一个键，屏幕就跳过去。而且不需要电脑屏幕亮着——显示器正放着游戏机画面时，照样生效。
 
 ## 功能
 
@@ -44,7 +40,7 @@
 
 ### 什么样的显示器能用
 
-功能按显示器能力自动分层，**不需要任何手动配置**：
+功能按显示器能力自动分层，不需要任何手动配置：
 
 | 你的显示器 | 能用到的功能 |
 |---|---|
@@ -52,15 +48,13 @@
 | 普通显示器 + 支持 DDC/CI（走 DP / USB-C 更可靠） | 亮度调**硬件背光**、色温、场景、分辨率、屏幕时间；切源与音量不可用 |
 | 普通显示器 + 不支持 DDC/CI（或走 HDMI） | 软件调光、色温、场景与自动切换、分辨率与刷新率、屏幕时间 |
 
-也就是说：**不是小米的设备也能用**，少掉的只有「切信号源」和「显示器音量」这两块依赖 6095 接口的能力。
-
----
+也就是说，不是小米的设备也能用。少掉的只有「切信号源」和「显示器音量」这两块依赖 6095 接口的能力。
 
 ## 安装
 
 ### macOS
 
-需要 **macOS 13+**。
+需要 macOS 13+。
 
 **方式一：下载现成的**
 
@@ -89,11 +83,11 @@ open /Applications/MiTVSwitch.app
 
 ### Windows
 
-需要 **Windows 10 / 11 x64**。
+需要 Windows 10 / 11 x64。
 
 **方式一：下载现成的**
 
-到 [Releases](https://github.com/IceNoproblem/MiTVSwitch/releases) 下载 `MiTVSwitch-win-x64.exe`，双击运行。自包含单文件，**不需要装 .NET 运行时**。
+到 [Releases](https://github.com/IceNoproblem/MiTVSwitch/releases) 下载 `MiTVSwitch-win-x64.exe`，双击运行。自包含单文件，不需要装 .NET 运行时。
 
 首次运行可能弹 SmartScreen（未知发布者）：点「更多信息」→「仍要运行」。
 
@@ -109,8 +103,6 @@ build.bat
 
 产物在 `dist\win-x64\MiTVSwitch.exe`。
 
----
-
 ## 快速开始
 
 ### 第一步：找到设备的局域网 IP
@@ -123,7 +115,7 @@ build.bat
 
 ### 第二步：设置地址
 
-第一次启动会自动弹窗要地址。也可以从菜单点「**自动搜索局域网设备…**」，工具会扫本机所在网段，把找到的设备列出来（显示器会额外标注「（显示器）」）。
+第一次启动会自动弹窗要地址。也可以从菜单点「自动搜索局域网设备…」，工具会扫本机所在网段，把找到的设备列出来（显示器会额外标注「（显示器）」）。
 
 地址存在：
 
@@ -132,11 +124,11 @@ build.bat
 
 命令行工具读的是同一份文件。
 
-> **macOS 会弹「允许访问本地网络」**，必须点允许，否则连不上设备。这是 macOS 14 起的本地网络权限，不是安全问题。
+> macOS 会弹「允许访问本地网络」，必须点允许，否则连不上设备。这是 macOS 14 起的本地网络权限，不是安全问题。
 
 ### 第三步：确认能通
 
-菜单里点「**测试连接**」，会打印设备名、平台、固件版本和信号源列表。看到类似这样就成功了：
+菜单里点「测试连接」，会打印设备名、平台、固件版本和信号源列表。看到类似这样就成功了：
 
 ```
 地址：192.168.110.155
@@ -147,11 +139,9 @@ build.bat
 判定：显示器
 ```
 
----
-
 ## 设置面板
 
-菜单里点「**打开设置面板…**」。
+菜单里点「打开设置面板…」。
 
 - **信号源**：按设备实际提供的接口列出按钮，没有的口会置灰
 - **音量与亮度**：两条滑动条，两侧保留 `−` / `+` 按钮（亮度每档 5%）
@@ -162,8 +152,6 @@ build.bat
 - **快捷键**：每个动作一行，点右侧按键重新录制
 
 面板是原生控件（macOS AppKit / Windows WinForms），没有引入任何第三方 UI 框架。
-
----
 
 ## 快捷键
 
@@ -194,31 +182,29 @@ build.bat
 
 ### 为什么不需要辅助功能权限
 
-macOS 用 Carbon 的 `RegisterEventHotKey`，Windows 用 `RegisterHotKey`。两者都是系统级注册，既不需要「辅助功能」授权，也不会抢焦点 —— 这是它比多数「模拟键盘」方案更干净的地方。
-
----
+macOS 用 Carbon 的 `RegisterEventHotKey`，Windows 用 `RegisterHotKey`。两者都是系统级注册，既不需要「辅助功能」授权，也不会抢焦点——这是它比多数「模拟键盘」方案更干净的地方。
 
 ## 功能详解
 
 ### 切信号源
 
-小米电视 / 小米生态显示器在 `6095` 端口跑着一个叫 **MiTV Assistant Server** 的 HTTP 服务（小米电视助手 App 用的就是它）。
+小米电视 / 小米生态显示器在 `6095` 端口跑着一个叫 MiTV Assistant Server 的 HTTP 服务（小米电视助手 App 用的就是它）。
 
 | 请求 | 作用 |
 |---|---|
 | `GET /request?action=isalive` | 设备名、平台、固件版本 |
 | `GET /controller?action=getsysteminfo` | 设备名、deviceid、MAC |
-| `GET /controller?action=getsources` | **真实输入列表（编号 + 名字）** |
+| `GET /controller?action=getsources` | 真实输入列表（编号 + 名字） |
 | `GET /controller?action=getvolume` | 当前音量 |
 | `GET /controller?action=keyevent&keycode=home` | 模拟按键 |
 | `GET /controller?action=changesource&source=HDMI1` | 按名字切 |
-| **`GET /controller?action=changesource2&sourceid=29`** | **按编号切，DP / USB-C 只能走这条** |
+| `GET /controller?action=changesource2&sourceid=29` | 按编号切，DP / USB-C 只能走这条 |
 
 返回都是 JSON，成功时是 `{"status":0,"msg":"success","data":{}}`。
 
 #### 为什么按编号切，而不是按名字
 
-`changesource&source=HDMI1` 这种按名字的写法对 **DP 和 USB-C 会被拒**（返回 `msg:error`），因为它只认电视那套输入名。
+`changesource&source=HDMI1` 这种按名字的写法对 DP 和 USB-C 会被拒（返回 `msg:error`），因为它只认电视那套输入名。
 
 `getsources` 会返回设备真实的口：
 
@@ -228,9 +214,9 @@ macOS 用 Carbon 的 `RegisterEventHotKey`，Windows 用 `RegisterHotKey`。两�
                {"sourceId":29,"sourceName":"DP"}]}
 ```
 
-拿编号调 `changesource2&sourceid=29` 就能切到 DP。编号沿用 MStar 电视输入表：**23 = HDMI1，24 = HDMI2，29 = DP，30 = USB-C**。老固件会把 29 报成 `DVI`，所以本项目按编号纠正名字。
+拿编号调 `changesource2&sourceid=29` 就能切到 DP。编号沿用 MStar 电视输入表：23 = HDMI1，24 = HDMI2，29 = DP，30 = USB-C。老固件会把 29 报成 `DVI`，所以本项目按编号纠正名字。
 
-程序启动时自动拉一次这份列表；`getsources` 不可用的老固件会退回按名字切，功能照旧，只是 DP / USB-C 切不动。
+程序启动时自动拉一次这份列表。`getsources` 不可用的老固件会退回按名字切，功能照旧，只是 DP / USB-C 切不动。
 
 #### 判断你的设备支不支持
 
@@ -256,10 +242,10 @@ $wc.DownloadString("http://<设备IP>:6095/controller?action=getvolume")
 
 ### 亮度：硬件背光优先，不行就软件调光
 
-启动时会**只读不写**地探一次 DDC/CI：
+启动时会只读不写地探一次 DDC/CI：
 
-- 读得到 → 亮度调的是**显示器硬件背光**，和显示器 OSD 里的亮度是一回事
-- 读不到 → 退到**软件调光**，改显卡的 Gamma 查色表
+- 读得到 → 亮度调的是显示器硬件背光，和显示器 OSD 里的亮度是一回事
+- 读不到 → 退到软件调光，改显卡的 Gamma 查色表
 
 | | 硬件背光（DDC/CI） | 软件调光（Gamma） |
 |---|---|---|
@@ -267,7 +253,7 @@ $wc.DownloadString("http://<设备IP>:6095/controller?action=getvolume")
 | Windows | `dxva2` 的 `GetMonitorBrightness` / `SetMonitorBrightness` | `SetDeviceGammaRamp` |
 | 画质影响 | 无 | 压得越暗对比度越低 |
 
-**Apple Silicon 上 DDC/CI 只在 DP / USB-C 链路通**，HDMI 口不转发 I²C 通道，探活会失败并自动退回软件调光 —— 这不是故障。想确认自己的链路：
+Apple Silicon 上 DDC/CI 只在 DP / USB-C 链路通，HDMI 口不转发 I²C 通道，探活会失败并自动退回软件调光——这不是故障。想确认自己的链路：
 
 ```bash
 ioreg -lw0 -r -c IOMobileFramebuffer | grep -i transport
@@ -289,7 +275,7 @@ ioreg -lw0 -r -c IOMobileFramebuffer | grep -i transport
 | 观影 | 70% | 4000K |
 | 夜间 | 55% | 4000K |
 
-勾上「按时间自动切换」后，程序每分钟看一次表：白天区间用「日间」，其余时间用「夜间」。区间默认 `08:00` → `20:00`，两个时间点都能改；把夜间设得比白天早也支持（按跨夜处理）。
+勾上「按时间自动切换」后，程序每分钟看一次表：白天区间用「日间」，其余时间用「夜间」。区间默认 `08:00` → `20:00`，两个时间点都能改。把夜间设得比白天早也支持（按跨夜处理）。
 
 ### 分辨率与刷新率
 
@@ -302,8 +288,8 @@ ioreg -lw0 -r -c IOMobileFramebuffer | grep -i transport
 
 每 30 秒采样一次，按天记两个数：
 
-- **亮屏**：屏幕没睡、也没锁屏的时长
-- **使用**：亮屏中，最近 5 分钟内有过键鼠 / 触控板输入的时长
+- 亮屏：屏幕没睡、也没锁屏的时长
+- 使用：亮屏中，最近 5 分钟内有过键鼠 / 触控板输入的时长
 
 | | 判空闲 | 判熄屏 / 锁屏 |
 |---|---|---|
@@ -314,7 +300,7 @@ ioreg -lw0 -r -c IOMobileFramebuffer | grep -i transport
 
 ### 320Hz 竞技模式
 
-REDMI G Pro 27U 这类双模显示器，在 4K 160Hz 与 1080p 320Hz 之间切换需要换 EDID，原本只能进显示器菜单操作。**没有对应接口**，所以走遥控按键宏：
+REDMI G Pro 27U 这类双模显示器，在 4K 160Hz 与 1080p 320Hz 之间切换需要换 EDID，原本只能进显示器菜单操作。没有对应接口，所以走遥控按键宏：
 
 ```
 menu → right × 4 → enter → right（开）/ left（关）→ back × 2
@@ -323,8 +309,6 @@ menu → right × 4 → enter → right（开）/ left（关）→ back × 2
 右移次数按实测确定为 4 次。不同机型的游戏栏层级可能不同，点不对就调 `menu` 后的右移次数（见 `setCompetitiveMode`）。
 
 切换后显示器会黑一下再回来，系统需要几秒重新识别。
-
----
 
 ## 命令行
 
@@ -373,8 +357,6 @@ chmod +x mitsw
 
 或者给 `switch.ps1` 建个快捷方式，在「属性 → 快捷键」里设组合键。
 
----
-
 ## 自定义信号源
 
 默认只列了 HDMI 1 / HDMI 2 / DisplayPort / USB-C 四个口。要改名或加口，改源码里的一张表。
@@ -404,31 +386,29 @@ internal static readonly Source[] Sources =
 
 规则：
 
-- `key` / `Key`：源名，**大小写不敏感**。启动时会用 `getsources` 解析成设备上的编号，再走 `changesource2`
+- `key` / `Key`：源名，大小写不敏感。启动时会用 `getsources` 解析成设备上的编号，再走 `changesource2`
 - `title` / `Title`：菜单和面板里显示的名字
 - 热键：macOS 写 `hotkey: nil` 表示不绑；Windows 的热键默认值在 `Hotkeys.Defaults()` 里，也可以直接在界面上改
-- **数组第 1、2 项同时是「睡眠切换」的目标**（睡眠切到第 1 项，唤醒切回第 2 项）
+- 数组第 1、2 项同时是「睡眠切换」的目标（睡眠切到第 1 项，唤醒切回第 2 项）
 
-> 加了自定义源名却没生效？先用 `./mitsw id <源名>` 或 `.\switch.ps1 id <源名>` 看设备认不认这个口，认不出会明确告诉你「设备没有这个输入」并列出真实可用的。
+> 加了自定义源名却没生效？先用 `./mitsw id <源名>` 或 `.\switch.ps1 id <源名>` 看设备认不认这个口。认不出会明确告诉你「设备没有这个输入」，并列出真实可用的。
 
 改完 macOS 重新 `./build.sh`，Windows 重新 `build.bat`。
-
----
 
 ## 排障
 
 ### 连不上，但 `curl` 明明能通
 
-**最常见的坑：系统代理。**
+最常见的坑：系统代理。
 
-系统代理的「忽略这些主机」列表**往往不支持 CIDR 网段** —— 写 `192.168.0.0/16` 是无效的，系统会把它当一串普通字符。结果发往 `192.168.1.x` 的请求照样被塞进代理（比如 Clash 的 `127.0.0.1:7890`），然后死在代理里。
+系统代理的「忽略这些主机」列表往往不支持 CIDR 网段——写 `192.168.0.0/16` 是无效的，系统会把它当一串普通字符。结果发往 `192.168.1.x` 的请求照样被塞进代理（比如 Clash 的 `127.0.0.1:7890`），然后死在代理里。
 
-表现很有迷惑性：**公网能通、局域网不通**，容易被误判成权限问题。
+表现很有迷惑性：公网能通、局域网不通，容易被误判成权限问题。
 
 本项目的处理：
 
-- **macOS** 不用 `NSURLSession`，改用裸 BSD socket（`socket` + `connect` + `send/recv`）自己拼 HTTP/1.0 请求，从根上绕开代理层
-- **Windows** 给 `HttpClientHandler` 设 `UseProxy = false`
+- macOS 不用 `NSURLSession`，改用裸 BSD socket（`socket` + `connect` + `send/recv`）自己拼 HTTP/1.0 请求，从根上绕开代理层
+- Windows 给 `HttpClientHandler` 设 `UseProxy = false`
 - 命令行版用 `curl --noproxy '*'` / `WebClient.Proxy = $null`
 
 ### 开机后第一次切换失败（macOS）
@@ -465,46 +445,42 @@ internal static readonly Source[] Sources =
 
 ### 音量键 / 亮度键没反应
 
-- 音量走局域网遥控，**设备必须在线**；离线时按了不报错也不生效
-- 亮度默认走软件调光，改的是本机 Gamma，与显示器无关；没变化就看面板里百分比是否真的动了
+- 音量走局域网遥控，设备必须在线；离线时按了不报错也不生效
+- 亮度默认走软件调光，改的是本机 Gamma，与显示器无关。没变化就看面板里百分比是否真的动了
 - Windows 上有些显卡驱动会拒绝偏离标准曲线太远的 Gamma（最暗大约只到 50%），日志里会记「显卡不接受」
 
 ### 亮度没走硬件背光
 
 DDC/CI 是显示器调背光的标准做法，`m1ddc` / BetterDisplay / MonitorControl 都走这条。探不到就安静退回软件调光，常见原因：
 
-- **Apple Silicon 的 HDMI 口不开放 DDC 的 I²C 通道**（最常见的那个）
-- 显示器本身不支持 MCCS 亮度 —— 电视和入门显示器很普遍
+- Apple Silicon 的 HDMI 口不开放 DDC 的 I²C 通道（最常见的那个）
+- 显示器本身不支持 MCCS 亮度——电视和入门显示器很普遍
 - 显示器在节能状态，先唤醒再探
 
 判断当前走哪条路：面板里色温右边那行小字，或看日志的 `DDC 探活：…`。
 
-> 切信号源和显示器音量**不走 DDC**，它们走 6095 局域网接口，普通显示器没有这个能力。
+> 切信号源和显示器音量不走 DDC，它们走 6095 局域网接口，普通显示器没有这个能力。
 
 ### 为什么不用 HDMI-CEC
 
 方向反了。CEC 是让设备之间互相通知，不是让电脑精确指定「切到第几个输入口」，而且 PC 本身不发 CEC 命令。
 
-顺带一提：如果显示器还接着游戏机，**进显示器设置里关掉「CEC 一键关机 / 设备自动关机联动」，保留「CEC 开机联动」**，就能解决「电脑休眠把游戏机一起关掉」的问题 —— 这跟切源是两件事，建议一起处理。
-
----
+顺带一提：如果显示器还接着游戏机，进显示器设置里关掉「CEC 一键关机 / 设备自动关机联动」，保留「CEC 开机联动」，就能解决「电脑休眠把游戏机一起关掉」的问题。这跟切源是两件事，建议一起处理。
 
 ## 已知限制
 
-- **USB-C 只有带这个口的机型才有**，工具会如实报告「设备没有这个输入」，不是切换失败
-- **320Hz 按键序列只在 REDMI G Pro 27U 上验证过**，其他双模机型的菜单层级可能不同，需调 `menu` 后的右移次数
-- **DDC/CI 硬件背光在 Apple Silicon 的 HDMI 口上通不了**，会退回软件调光
+- USB-C 只有带这个口的机型才有，工具会如实报告「设备没有这个输入」，不是切换失败
+- 320Hz 按键序列只在 REDMI G Pro 27U 上验证过，其他双模机型的菜单层级可能不同，需调 `menu` 后的右移次数
+- DDC/CI 硬件背光在 Apple Silicon 的 HDMI 口上通不了，会退回软件调光
 - 软件调光压暗后对比度会下降，替代不了硬件背光
 - 屏幕时间只统计主显示器，多屏时不做区分
 - 自动场景只切日间 / 夜间两个，「阅读」「观影」需要手动点
 - 不做自动更新
 - `action=capturescreen`（截屏）在 HDMI 输入下无效，因为此时 TV 系统在后台
 - 部分设备的 ADB(5555)、Android TV Remote(6466/6467) 是关的，本工具不依赖它们
-- 小米电视助手协议是**非公开接口**，系统更新后可能变化。真改了就退回 `keyevent` 模拟按键
+- 小米电视助手协议是非公开接口，系统更新后可能变化。真改了就退回 `keyevent` 模拟按键
 - Windows 版与 macOS 版逻辑一致，但尚未在大量机型上长期验证
 - macOS 版是菜单栏常驻形态，没有 Dock 图标
-
----
 
 ## 项目结构
 
@@ -557,25 +533,19 @@ MiTVSwitch/
 - 推到 `main` 或提 PR 时，在 `windows-latest` / `macos-latest` 上编译，产物存 artifact
 - 打 `v*` 标签时自动建 Release，附 `MiTVSwitch-win-x64.exe` 和 `MiTVSwitch-macos.zip`
 
----
-
 ## 安全与隐私
 
 - 只在局域网内发 HTTP GET，不联网、不上报、无遥测
-- 设备端**没有鉴权**：能访问到 6095 端口的人都能控制它。**不要把 6095 端口映射到公网**
+- 设备端没有鉴权：能访问到 6095 端口的人都能控制它。不要把 6095 端口映射到公网
 - 日志只记请求结果，不含隐私数据
 - 屏幕时间数据只存在本机，不上传
 
----
-
 ## 致谢
 
-- **[MonitorBar](https://github.com/Binaryify/MonitorBar)**（MIT，© 2026 binaryify）—— `getsources` / `changesource2` 这套按编号切源的接口、29/30 的输入编号约定、双模显示器切 320Hz 的按键宏，都是从它这里学到的。屏幕时间、分辨率切换、场景分区的思路也参考了它。本项目用 Swift 与 C# 重新实现，未复制其 Go 源码。
-- **[MonitorControl](https://github.com/MonitorControl/MonitorControl)**（MIT）—— macOS 端 DDC/CI 的报文格式与重试策略参考了它的 `Arm64DDC.swift`。本项目只实现亮度 VCP `0x10`，并以 Swift 重写。
+- [MonitorBar](https://github.com/Binaryify/MonitorBar)（MIT，© 2026 binaryify）——`getsources` / `changesource2` 这套按编号切源的接口、29/30 的输入编号约定、双模显示器切 320Hz 的按键宏，都是从它这里学到的。屏幕时间、分辨率切换、场景分区的思路也参考了它。本项目用 Swift 与 C# 重新实现，未复制其 Go 源码。
+- [MonitorControl](https://github.com/MonitorControl/MonitorControl)（MIT）——macOS 端 DDC/CI 的报文格式与重试策略参考了它的 `Arm64DDC.swift`。本项目只实现亮度 VCP `0x10`，并以 Swift 重写。
 
 完整归属声明见 [NOTICE](NOTICE)。
-
----
 
 ## 免责声明
 
@@ -583,13 +553,13 @@ MiTVSwitch/
 
 ## License
 
-**[GPL-3.0](LICENSE)**（GNU General Public License, Version 3, 29 June 2007）。
+[GPL-3.0](LICENSE)（GNU General Public License, Version 3, 29 June 2007）。
 
 | 要求 | GPL-3.0 的规定 |
 |---|---|
 | **必须署名** | 分发时必须保留版权声明与作者署名；修改过的版本必须显著标注「已修改」及修改日期 |
-| **必须开源** | 对外分发（含修改版、二进制版）都必须提供**完整对应源代码**，且同样以 GPL-3.0 授权，不允许改成闭源 |
-| **允许商用** | GPL-3.0 **不禁止**商业使用。它约束的是「分发时是否开源」，不是你「能不能靠它赚钱」 |
+| **必须开源** | 对外分发（含修改版、二进制版）都必须提供完整对应源代码，且同样以 GPL-3.0 授权，不允许改成闭源 |
+| **允许商用** | GPL-3.0 不禁止商业使用。它约束的是「分发时是否开源」，不是你「能不能靠它赚钱」 |
 | **专利授权** | 贡献者被视为向使用者授予专利许可，不能事后拿专利反过来起诉使用者 |
 | **无担保** | 作者不提供任何担保，使用风险自负 |
 
