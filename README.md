@@ -6,6 +6,7 @@
 
 **macOS 菜单栏 + Windows 托盘，双平台。**
 
+[![bilibili](https://img.shields.io/badge/Bilibili-主页-00A1D6?logo=bilibili&logoColor=white)](https://space.bilibili.com/2250922)
 [![release](https://img.shields.io/github/v/release/IceNoproblem/MiTVSwitch?color=blue)](https://github.com/IceNoproblem/MiTVSwitch/releases)
 [![build](https://img.shields.io/github/actions/workflow/status/IceNoproblem/MiTVSwitch/build.yml?branch=main)](https://github.com/IceNoproblem/MiTVSwitch/actions)
 [![license](https://img.shields.io/github/license/IceNoproblem/MiTVSwitch)](LICENSE)
